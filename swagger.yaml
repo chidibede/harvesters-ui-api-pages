@@ -1,4764 +1,979 @@
-openapi: 3.0.0
+openapi: 3.0.3
 info:
-  title: dgoval export updated
+  title: Harvesters Hub API
+  description: |
+    HTTP API for Harvesters Hub. All routes except sign-in require `Authorization: Bearer <accessToken>`.
+    Set collection variable `baseUrl` to your API Gateway URL (no trailing slash).
+    Optional: `Idempotency-Key` header on retry-safe POSTs (training register, nominate, participation, etc.).
   version: 1.0.0
-  description: ''
+
 servers:
-  - url: '{{DGOVAL_BASE_URL}}'
+  - url: "{{baseUrl}}"
+    description: API Gateway base URL
+
+tags:
+  - name: Auth
+  - name: Audit
+  - name: Workers
+  - name: Super Admin
+  - name: Attendance
+  - name: Departments
+  - name: Trainings
+  - name: Users
+  - name: Reports
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Optional idempotency token for safe POST retries
+  schemas:
+    LoginRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: Admin login code (stored as admin.code)
+    CreateTrainingRequest:
+      type: object
+      required: [name, start_date, end_date, category, mode]
+      properties:
+        name: { type: string }
+        description: { type: string, maxLength: 1500 }
+        cohort: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        category:
+          type: string
+          enum: [leadership, orientation, skills]
+        facilitator: { type: string }
+        mode:
+          type: string
+          enum: [physical, virtual]
+        duration: { type: string }
+        capacity: { type: integer }
+        registration_deadline: { type: string, format: date-time }
+        template_slug: { type: string }
+    TrainingModuleRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        sort_order: { type: integer }
+    TrainingLessonRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        content: { type: string }
+        sort_order: { type: integer }
+    NominateWorkersRequest:
+      type: object
+      required: [worker_ids]
+      properties:
+        worker_ids:
+          type: array
+          items: { type: integer }
+    RegisterTrainingRequest:
+      type: object
+      properties:
+        worker_id:
+          type: integer
+          description: When caller can nominate; omitted for self-registration via linked worker
+    ParticipationRequest:
+      type: object
+      required: [date]
+      properties:
+        user_id: { type: integer }
+        worker_id: { type: integer }
+        date: { type: string, format: date }
+        session_date: { type: string, format: date }
+        status:
+          type: string
+          enum: [present, absent]
+    DepartmentAssignmentRequest:
+      type: object
+      required: [worker_id, department_id, start_date, required_duration_days]
+      properties:
+        worker_id: { type: integer }
+        user_id: { type: integer }
+        department_id: { type: integer }
+        start_date: { type: string, format: date }
+        required_duration_days: { type: integer, minimum: 1 }
+    StreamSessionRequest:
+      type: object
+      required: [provider]
+      properties:
+        provider: { type: string, example: daily }
+        provider_room_id: { type: string }
+        stream_url: { type: string }
+        screen_share_enabled: { type: boolean }
+        chat_enabled: { type: boolean }
+        qna_enabled: { type: boolean }
+        recording_auto: { type: boolean }
+        participant_list_visible: { type: boolean }
+    RecordingRequest:
+      type: object
+      required: [title, storage_url]
+      properties:
+        title: { type: string }
+        storage_url: { type: string }
+        stream_session_id: { type: integer }
+        duration_seconds: { type: integer }
+        downloadable: { type: boolean }
+        library_visible: { type: boolean }
+    PatchStreamSessionRequest:
+      type: object
+      properties:
+        stream_url: { type: string }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        provider_room_id: { type: string }
+
+security:
+  - bearerAuth: []
+
 paths:
-  /auth/signup:
+  /api/hub/auth/signin:
     post:
-      summary: auth sign up
-      responses: {}
-      tags:
-        - auth
-      description: >-
-        ## Sign Up Endpoint
-
-
-        **Endpoint:**
-        `https://rcyjzmhu57.execute-api.eu-west-1.amazonaws.com/auth/signup`  
-
-        **Method:** `POST`
-
-
-        This endpoint is used to register a new user in the system. The request
-        requires the user to provide their email, password, first name, last
-        name, and confirmation that they have accepted the terms of service.
-
-
-        ### Request Body Parameters
-
-
-        - **email** (string): The email address of the user.
-            
-        - **password** (string): The password chosen by the user.
-            
-        - **firstName** (string): The first name of the user.
-            
-        - **lastName** (string): The last name of the user.
-            
-        - **hasAcceptedTerms** (boolean): Indicates whether the user has
-        accepted the terms of service.
-            
-
-        ### Response
-
-
-        On a successful registration, the server responds with a status code of
-        `201` and a JSON object indicating the success of the operation.
-
-
-        - **success** (boolean): Indicates whether the signup was successful.
-            
-        - **message** (string): A message providing additional context (may be
-        empty).
-            
-
-        Ensure that all required fields are provided in the request to
-        successfully create a new user account.
-
-
-        This endpoint allows users to create a new account by providing their
-        personal details. It is designed to facilitate user registration in the
-        system.
-
-
-        ### Request
-
-
-        - **Method**: POST
-            
-        - **URL**:
-        `https://rcyjzmhu57.execute-api.eu-west-1.amazonaws.com/auth/signup`
-            
-
-        #### Request Body
-
-
-        The request body must be a JSON object containing the following
-        parameters:
-
-
-        - `email` (string): The user's email address. This will be used for
-        account verification and login.
-            
-        - `password` (string): The user's chosen password. It should meet the
-        security requirements set by the application.
-            
-        - `firstName` (string): The user's first name.
-            
-        - `lastName` (string): The user's last name.
-            
-        - `hasAcceptedTerms` (boolean): A flag indicating whether the user has
-        accepted the terms and conditions of the service.
-            
-
-        **Example Request Body**:
-
-
-        ``` json
-
-        {
-          "email": "user@example.com",
-          "password": "securePassword123",
-          "firstName": "John",
-          "lastName": "Doe",
-          "hasAcceptedTerms": true
-        }
-
-         ```
-
-        ### Response
-
-
-        On successful account creation, the API will return a response with the
-        following structure:
-
-
-        - **Status Code**: 201 (Created)
-            
-        - **Content-Type**: text/plain
-            
-        - **Response Body**:
-            
-            - `success` (boolean): Indicates whether the signup was successful.
-                
-            - `message` (string): A message providing additional information about the signup process (may be empty).
-                
-
-        **Example Response**:
-
-
-        ``` json
-
-        {
-          "success": true,
-          "message": ""
-        }
-
-         ```
-
-        ### Summary
-
-
-        This endpoint is essential for onboarding new users by collecting their
-        necessary information and confirming their acceptance of terms. A
-        successful response indicates that the user has been registered and can
-        proceed to log in.
+      tags: [Auth]
+      summary: Sign in (admin code)
+      security: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                password:
-                  type: string
-                firstName:
-                  type: string
-                lastName:
-                  type: string
-            example:
-              email: chidimarshalbede+1@gmail.com
-              password: John@weq112
-              firstName: Chidi
-              lastName: Bede
-  /auth/signin:
-    post:
-      summary: signin
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-            example: |-
-              {
-                  "email": "caracolasstore@gmail.com",
-                  // "email": "chidimarshalbede+1@gmail.com",
-                  // "email": "caracolasstore+8@gmail.com",
-                  // "password": "Password@weq112"
-                  "password": "John@weq112"
-                  // "password": "KtQhrb@W&w&a"
-              }
-  /auth/signout:
-    post:
-      summary: signout
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                password:
-                  type: string
-            example:
-              email: chidibede@gmail.com
-              password: Password@weq112
-  /auth/forgot-password:
-    post:
-      summary: forgot-password
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-            example:
-              email: caracolasstore@gmail.com
-  /auth/reset-password:
-    post:
-      summary: reset-password
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                newPassword:
-                  type: string
-            example:
-              email: caracolasstore@gmail.com
-              newPassword: Password@weq112
-  /auth/verify-reset-password:
-    post:
-      summary: verify-reset-password
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                otp:
-                  type: string
-                  format: color
-                email:
-                  type: string
-                  format: email
-            example:
-              otp: '810226'
-              email: caracolasstore@gmail.com
-  /auth/verify-otp:
-    post:
-      summary: verify otp
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                otp:
-                  type: string
-                  format: color
-            example:
-              email: chidimarshalbede@gmail.com
-              otp: '498906'
-  /auth/resend-otp:
-    post:
-      summary: resend otp
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-            example:
-              email: caracolasstore@gmail.com
-  /auth/refresh-token:
-    post:
-      summary: refresh token
-      parameters:
-        - name: Cookie
-          in: header
-          schema:
-            type: string
-          example: >-
-            refreshToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwMUs5REhKM1pIUllQQk5UUUgzTlE1VFpCSyIsImVtYWlsIjoiY2FyYWNvbGFzc3RvcmVAZ21haWwuY29tIiwiZmlyc3ROYW1lIjoiQ2FyYWNvbGFzIiwibGFzdE5hbWUiOiJzdG9yZSIsIm1lbWJlcnNoaXBzIjpbeyJjb21wYW55SWQiOiIwMUs5REhOUkhZOUNCWEdUQVNYWkg4QjNBViIsInJvbGUiOiJhZG1pbiJ9XSwiY3VycmVudFN0ZXAiOiJjb21wbGV0ZWQiLCJzZWxlY3RlZFBsYW5JZCI6IjAxSzlDNDBKNDhGNllGUVNHSEY5SlpHOUpUIiwidG9rZW5UeXBlIjoicmVmcmVzaCIsImlhdCI6MTc2Mjc3MjEwOSwiZXhwIjoxNzYzMzc2OTA5fQ.HqYNVzIe7RLlhUV2-uwSxJUcYxCqEpGFEot7GwwXQps
-      responses: {}
-      tags:
-        - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-  /api/payment/confirm:
-    post:
-      summary: confirm payment on success
-      responses: {}
-      tags:
-        - signup payment
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                paymentStatus:
-                  type: string
-                providerTxReference:
-                  type: string
-                paymentId:
-                  type: string
-            example:
-              paymentStatus: succeeded
-              providerTxReference: 8pofdacy5c
-              paymentId: 01KFXJH7XNDDM8MZ1H0455X85M
-  /api/payment/plans:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: accessToken and user payload
+        "400":
+          description: Invalid login
+
+  /api/hub/audit:
     get:
-      summary: Fetch payment plans
-      responses: {}
-      tags:
-        - signup payment
-  /api/payment/plans/select:
-    post:
-      summary: select payment plan
-      responses: {}
-      tags:
-        - signup payment
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                planId:
-                  type: string
-                companyId:
-                  type: string
-                userId:
-                  type: string
-                provider:
-                  type: string
-                callbackUrl:
-                  type: string
-                  format: uri
-            example:
-              planId: 01KBNYME23408PZBGYZAAG93KC
-              companyId: 01KFXJFET7VZD5B1VQ3K89XB6Q
-              userId: 01KFXJEKTWSN6P3G74M2EENE5W
-              provider: Paystack
-              callbackUrl: https://app.dgoval.com/payments/callback
-  /api/surveys/templates/01KA0ZJYTBD28PWHJ929ZFW06N/metadata:
-    patch:
-      summary: update template metadata
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                companyId:
-                  type: string
-                title:
-                  type: string
-                description:
-                  type: string
-            example:
-              companyId: 01K9DA5HM0406JZ1PP322VA1M8
-              title: Executive Team Evaluation V2
-              description: Used for internal assessment of executive performance V2
-  /api/surveys/templates/01KA0ZE56JZFXMWZGE23VAN688/copy:
-    post:
-      summary: Copy or Duplicate template
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                companyId:
-                  type: string
-            example:
-              companyId: 01K9DA5HM0406JZ1PP322VA1M8
-  /api/surveys/templates/01KA0ZTV53940PTFHPVS2XXJYV/questions:
-    put:
-      summary: Update template questions
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                companyId:
-                  type: string
-                questions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      position:
-                        type: integer
-                      text:
-                        type: string
-                      type:
-                        type: string
-                      required:
-                        type: boolean
-                      skippable:
-                        type: boolean
-                      helpText:
-                        type: string
-                      likert:
-                        type: object
-                        properties:
-                          scaleMinLabel:
-                            type: string
-                          scaleMaxLabel:
-                            type: string
-                          scalePoints:
-                            type: integer
-            example:
-              companyId: 01K9DA5HM0406JZ1PP322VA1M8
-              questions:
-                - position: 1
-                  text: How clear are the team's goals?
-                  type: likert
-                  required: true
-                  skippable: false
-                  helpText: 1 = Strongly disagree, 5 = Strongly agree
-                  likert:
-                    scaleMinLabel: Strongly disagree
-                    scaleMaxLabel: Strongly agree
-                    scalePoints: 5
-                - position: 2
-                  text: Which leadership areas need improvement?
-                  type: longText
-                  required: false
-                  skippable: true
-                  helpText: Add as much detail as possible
-                - position: 3
-                  text: State your department
-                  type: shortText
-                  required: true
-                  skippable: false
-                  helpText: Keep it short
-                - position: 4
-                  text: Do you receive clear direction from leadership?
-                  type: yesNo
-                  required: true
-                  skippable: false
-  /api/surveys/templates/01KAV9RAJN1XTRHR79SGKQWQKZ/autosave:
-    put:
-      summary: Auto save template
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-            example: |-
-              {
-                  "companyId": "01K9DHNRHY9CBXGTASXZH8B3AV",
-                  "questions": [
-                      {
-                          "position": 1,
-                          "text": "How clear are the team's goals?",
-                          "type": "likert",
-                          "required": true,
-                          "skippable": false,
-                          "helpText": "1 = Strongly disagree, 5 = Strongly agree",
-                          "likert": {
-                              "scaleMinLabel": "Strongly disagree",
-                              "scaleMaxLabel": "Strongly agree",
-                              "scalePoints": 5
-                          }
-                      },
-                      {
-                          "position": 2,
-                          "text": "Which leadership areas need improvement?",
-                          "type": "longText",
-                          "required": false,
-                          "skippable": true,
-                          "helpText": "Add as much detail as possible"
-                      },
-                      {
-                          "position": 3,
-                          "text": "State your department",
-                          "type": "shortText",
-                          "required": true,
-                          "skippable": false,
-                          "helpText": "Keep it short"
-                      },
-                      {
-                          "position": 4,
-                          "text": "Do you receive clear direction from leadership?",
-                          "type": "yesNo",
-                          "required": true,
-                          "skippable": false
-                      }
-                      // {
-                      //     "position": 5,
-                      //     "text": "Rate the effectiveness of leadership communication",
-                      //     "type": "singleChoice",
-                      //     "required": true,
-                      //     "skippable": false,
-                      //     "options": [
-                      //         {
-                      //             "position": 1,
-                      //             "label": "Poor",
-                      //             "value": "poor",
-                      //             "isDefault": false
-                      //         },
-                      //         {
-                      //             "position": 2,
-                      //             "label": "Fair",
-                      //             "value": "fair",
-                      //             "isDefault": false
-                      //         },
-                      //         {
-                      //             "position": 3,
-                      //             "label": "Good",
-                      //             "value": "good",
-                      //             "isDefault": true
-                      //         },
-                      //         {
-                      //             "position": 4,
-                      //             "label": "Excellent",
-                      //             "value": "excellent",
-                      //             "isDefault": false
-                      //         }
-                      //     ]
-                      // },
-                      // {
-                      //     "position": 6,
-                      //     "text": "Select the tools you use weekly",
-                      //     "type": "multipleChoice",
-                      //     "required": false,
-                      //     "skippable": true,
-                      //     "helpText": "Choose all that apply",
-                      //     "options": [
-                      //         {
-                      //             "position": 1,
-                      //             "label": "Slack",
-                      //             "value": "slack"
-                      //         },
-                      //         {
-                      //             "position": 2,
-                      //             "label": "Teams",
-                      //             "value": "teams"
-                      //         },
-                      //         {
-                      //             "position": 3,
-                      //             "label": "Zoom",
-                      //             "value": "zoom"
-                      //         },
-                      //         {
-                      //             "position": 4,
-                      //             "label": "Email",
-                      //             "value": "email"
-                      //         }
-                      //     ]
-                      // }
-                  ]
-              }
-  /api/surveys/templates/01KA0ZJYTBD28PWHJ929ZFW06P/publish:
-    post:
-      summary: Publish template
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                companyId:
-                  type: string
-                questions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      position:
-                        type: integer
-                      text:
-                        type: string
-                      type:
-                        type: string
-                      required:
-                        type: boolean
-                      skippable:
-                        type: boolean
-                      helpText:
-                        type: string
-                      likert:
-                        type: object
-                        properties:
-                          scaleMinLabel:
-                            type: string
-                          scaleMaxLabel:
-                            type: string
-                          scalePoints:
-                            type: integer
-            example:
-              companyId: 01K9DA5HM0406JZ1PP322VA1M8
-              questions:
-                - position: 1
-                  text: How clear are the team's goals?
-                  type: likert
-                  required: true
-                  skippable: false
-                  helpText: 1 = Strongly disagree, 5 = Strongly agree
-                  likert:
-                    scaleMinLabel: Strongly disagree
-                    scaleMaxLabel: Strongly agree
-                    scalePoints: 5
-                - position: 2
-                  text: Which leadership areas need improvement?
-                  type: longText
-                  required: false
-                  skippable: true
-                  helpText: Add as much detail as possible
-                - position: 3
-                  text: State your department
-                  type: shortText
-                  required: true
-                  skippable: false
-                  helpText: Keep it short
-                - position: 4
-                  text: Do you receive clear direction from leadership?
-                  type: yesNo
-                  required: true
-                  skippable: false
-                - position: 5
-                  text: Rate the effectiveness of leadership communication
-                  type: singleChoice
-                  required: true
-                  skippable: false
-                  options:
-                    - position: 1
-                      label: Poor
-                      value: poor
-                      isDefault: false
-                    - position: 2
-                      label: Fair
-                      value: fair
-                      isDefault: false
-                    - position: 3
-                      label: Good
-                      value: good
-                      isDefault: true
-                    - position: 4
-                      label: Excellent
-                      value: excellent
-                      isDefault: false
-                - position: 6
-                  text: Select the tools you use weekly
-                  type: multipleChoice
-                  required: false
-                  skippable: true
-                  helpText: Choose all that apply
-                  options:
-                    - position: 1
-                      label: Slack
-                      value: slack
-                    - position: 2
-                      label: Teams
-                      value: teams
-                    - position: 3
-                      label: Zoom
-                      value: zoom
-                    - position: 4
-                      label: Email
-                      value: email
-  /api/surveys/backoffice/templates:
-    post:
-      summary: create survey template Backoffice Dgoval
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                description:
-                  type: string
-                questions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      position:
-                        type: integer
-                      text:
-                        type: string
-                      type:
-                        type: string
-                      required:
-                        type: boolean
-                      skippable:
-                        type: boolean
-                      helpText:
-                        type: string
-                      likert:
-                        type: object
-                        properties:
-                          scaleMinLabel:
-                            type: string
-                          scaleMaxLabel:
-                            type: string
-                          scalePoints:
-                            type: integer
-            example:
-              title: Executive Team Evaluation
-              description: Used for internal assessment of executive performance
-              questions:
-                - position: 1
-                  text: How clear are the team's goals?
-                  type: likert
-                  required: true
-                  skippable: false
-                  helpText: 1 = Strongly disagree, 5 = Strongly agree
-                  likert:
-                    scaleMinLabel: Strongly disagree
-                    scaleMaxLabel: Strongly agree
-                    scalePoints: 5
-                - position: 2
-                  text: Which leadership areas need improvement?
-                  type: longText
-                  required: false
-                  skippable: true
-                  helpText: Add as much detail as possible
-                - position: 3
-                  text: State your department
-                  type: shortText
-                  required: true
-                  skippable: false
-                  helpText: Keep it short
-                - position: 4
-                  text: Do you receive clear direction from leadership?
-                  type: yesNo
-                  required: true
-                  skippable: false
-                - position: 5
-                  text: Rate the effectiveness of leadership communication
-                  type: singleChoice
-                  required: true
-                  skippable: false
-                  options:
-                    - position: 1
-                      label: Poor
-                      value: poor
-                      isDefault: false
-                    - position: 2
-                      label: Fair
-                      value: fair
-                      isDefault: false
-                    - position: 3
-                      label: Good
-                      value: good
-                      isDefault: true
-                    - position: 4
-                      label: Excellent
-                      value: excellent
-                      isDefault: false
-                - position: 6
-                  text: Select the tools you use weekly
-                  type: multipleChoice
-                  required: false
-                  skippable: true
-                  helpText: Choose all that apply
-                  options:
-                    - position: 1
-                      label: Slack
-                      value: slack
-                    - position: 2
-                      label: Teams
-                      value: teams
-                    - position: 3
-                      label: Zoom
-                      value: zoom
-                    - position: 4
-                      label: Email
-                      value: email
-    get:
-      summary: list templates by dgoval
+      tags: [Audit]
+      summary: List audit logs
       parameters:
         - name: page
           in: query
-          schema:
-            type: integer
-          example: '1'
+          schema: { type: integer, default: 1 }
         - name: limit
           in: query
-          schema:
-            type: integer
-          example: '5'
-        - name: sort
+          schema: { type: integer, default: 20 }
+        - name: department
           in: query
-          schema:
-            type: string
-          example: desc
-        - name: sortBy
+          schema: { type: string }
+        - name: permissions
           in: query
-          schema:
-            type: string
-          example: createdAt
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-  /api/surveys/01K9DA5HM0406JZ1PP322VA1M8/templates:
+          schema: { type: string }
+          description: JSON array or comma-separated department list
+        - name: team
+          in: query
+          schema: { type: string }
+        - name: attendancedate
+          in: query
+          schema: { type: string }
+        - name: fromDate
+          in: query
+          schema: { type: string }
+        - name: toDate
+          in: query
+          schema: { type: string }
+        - name: event
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated audit rows
+
+  /api/hub/workers:
     get:
-      summary: list all templates for selected company
-      parameters:
-        - name: sortBy
-          in: query
-          schema:
-            type: string
-          example: updatedAt
-        - name: limit
-          in: query
-          schema:
-            type: integer
-          example: '5'
-        - name: page
-          in: query
-          schema:
-            type: integer
-          example: '1'
-        - name: sort
-          in: query
-          schema:
-            type: string
-          example: desc
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-  /api/surveys/templates/01KA0ZJYTBD28PWHJ929ZFW06N/versions:
+      tags: [Workers]
+      summary: List workers
+      responses:
+        "200":
+          description: Workers list
+
+  /api/hub/super/admin/workers:
     get:
-      summary: list template versions
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-  /api/surveys/01KA0ZJYTBD28PWHJ929ZFW06N/templates/details:
-    get:
-      summary: get template
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-  /api/surveys/templates/metadata:
+      tags: [Super Admin]
+      summary: List workers (admin)
+      responses:
+        "200":
+          description: Workers list
     post:
-      summary: create survey template metadata
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
+      tags: [Super Admin]
+      summary: Create worker
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                companyId:
-                  type: string
-                title:
-                  type: string
-                description:
-                  type: string
-            example:
-              companyId: 01K9DHNRHY9CBXGTASXZH8B3AV
-              title: Executive Team Evaluation
-              description: Used for internal assessment of executive performance
-  /api/surveys/01KA0ZJYTB28PWHJ929ZFW06N/template:
+      responses:
+        "200":
+          description: Created
+    put:
+      tags: [Super Admin]
+      summary: Update worker
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated
+
+  /api/hub/super/admin/attendance/export:
+    post:
+      tags: [Super Admin]
+      summary: Export attendance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Export triggered or file info
+
+  /api/hub/super/admin/{id}/workers/approve:
+    put:
+      tags: [Super Admin]
+      summary: Approve worker
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/super/admin/{id}/workers/approve-remove-worker:
+    put:
+      tags: [Super Admin]
+      summary: Approve worker removal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/super/admin/{id}/workers:
     delete:
-      summary: delete template
-      responses: {}
-      tags:
-        - survey
-      security:
-        - BearerAuth: []
-  /api/companies/logo/upload:
-    post:
-      summary: upload logo
-      responses: {}
-      tags:
-        - signup company
-  /api/companies:
-    post:
-      summary: create company
-      responses: {}
-      tags:
-        - signup company
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-            example: |-
-              {
-                  "logoUrl": "https://res.cloudinary.com/marshalcloudinary/image/upload/v1762257735/dgoval/20221114_161754-ecd4b9b6-7216-452e.jpg",
-                  "name": "Gracie G Tech",
-                  "category": "Public",
-                  "industry": "Trading",
-                  "address": "Abuja",
-                  // "userId": "01K9DA2VPGX2353AXSTQ93C6QY"
-                  "userId": "01KFXJEKTWSN6P3G74M2EENE5W"
-              }
+      tags: [Super Admin]
+      summary: Delete worker
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/super/admin/admins:
     get:
-      summary: list companies for user
-      responses: {}
-      tags:
-        - company branding
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                logoUrl:
-                  type: string
-                  format: uri
-                name:
-                  type: string
-                category:
-                  type: string
-                industry:
-                  type: string
-                address:
-                  type: string
-            example:
-              logoUrl: >-
-                https://res.cloudinary.com/marshalcloudinary/image/upload/v1762257735/dgoval/20221114_161754-ecd4b9b6-7216-452e-9d20-01e4dc10fecb.jpg
-              name: Guarantee Trust bank
-              category: Public
-              industry: Banking
-              address: Festac
-  /api/orgs/{COMPANY_ID}/invites:
+      tags: [Super Admin]
+      summary: List admins
+      responses:
+        "200":
+          description: Admins list
     post:
-      summary: Create Invite
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
+      tags: [Super Admin]
+      summary: Create admin
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                role:
-                  type: string
-                firstName:
-                  type: string
-                lastName:
-                  type: string
-                loginUrl:
-                  type: string
-                  format: uri
-            example:
-              email: chidimarshalbede@gmail.com
-              role: evaluation_manager
-              firstName: Gary
-              lastName: Neville
-              loginUrl: https://app.dgoval.com/login
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/01K9DA5HM0406JZ1PP322VA1M8/members:
+      responses:
+        "200":
+          description: Created
+
+  /api/hub/super/admin/{id}:
     put:
-      summary: update member
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-            example: "{\r\n    \"email\": \"caracolasstore+8@gmail.com\",\r\n    // \"role\": \"viewer\",\r\n    // \"firstName\": \"Bree\",\r\n    // \"lastName\": \"Colas\",\r\n    \"userId\": \"01KAGE0HRSYEGJR05CFEAFGPWA\"\r\n}"
-  /auth/first-login/set-password:
-    post:
-      summary: First sign in
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                currentPassword:
-                  type: string
-                newPassword:
-                  type: string
-            example:
-              email: caracolasstore+9@gmail.com
-              currentPassword: '#oYCHS*52Z3S'
-              newPassword: Password@weq112
-  /api/orgs/01K9DA5HM0406JZ1PP322VA1M8/invites/resend:
-    post:
-      summary: Resend invite
+      tags: [Super Admin]
+      summary: Update admin
       parameters:
-        - name: Authorization
-          in: header
-          schema:
-            type: string
-          example: '{{AUTH_TOKEN}}'
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                userId:
-                  type: string
-                loginUrl:
-                  type: string
-                  format: uri
-            example:
-              userId: 01KAGFAZGVB3133TFF9S6XARZR
-              loginUrl: https://app.dgoval.com/login
-  /api/orgs/{COMPANY_ID}/members/deactivate:
-    post:
-      summary: deactivate user
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                userId:
-                  type: string
-            example:
-              userId: 01KAGFAZGVB3133TFF9S6XARZR
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/members/reactivate:
-    post:
-      summary: reactivate user
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                userId:
-                  type: string
-                loginUrl:
-                  type: string
-                  format: uri
-            example:
-              userId: 01KAGFAZGVB3133TFF9S6XARZR
-              loginUrl: https://app.dgoval.com/login
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/invites/template:
-    get:
-      summary: Download csv template
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                loginUrl:
-                  type: string
-                role:
-                  type: string
-                firstName:
-                  type: string
-                lastName:
-                  type: string
-            example:
-              email: caracolasstore+1@gmail.com
-              loginUrl: yourapp.login.com
-              role: evaluation_manager
-              firstName: Cara
-              lastName: Colas
-  /api/orgs/{COMPANY_ID}/invites/csv/parse:
-    post:
-      summary: parse bulk csv
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/invites/csv:
-    post:
-      summary: bulk send invites csv array
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                members:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      first_name:
-                        type: string
-                        format: color
-                      last_name:
-                        type: string
-                      email:
-                        type: string
-                        format: email
-                      role:
-                        type: string
-            example:
-              members:
-                - first_name: Ada
-                  last_name: Lovelace
-                  email: ada@example.com
-                  role: admin
-                - first_name: Alan
-                  last_name: Turing
-                  email: caracolasstore+6@gmail.com
-                  role: evaluator
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/team:
-    get:
-      summary: list members
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-          example: '1'
-        - name: limit
-          in: query
-          schema:
-            type: integer
-          example: '5'
-        - name: sortBy
-          in: query
-          schema:
-            type: string
-          example: dateAdded
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/members/csv/export:
-    get:
-      summary: export team members
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/members/01KB7H5MS3BV54K7JE427JBP7C/delete:
+      responses:
+        "200":
+          description: OK
     delete:
-      summary: delete member
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/invites/pending:
+      tags: [Super Admin]
+      summary: Delete admin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/super/admin/{id}/role:
+    put:
+      tags: [Super Admin]
+      summary: Assign admin role
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/super/admin/{id}/permissions:
+    put:
+      tags: [Super Admin]
+      summary: Assign admin permissions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/super/admin/{id}/workers/details:
     get:
-      summary: Fetch pending invites for me
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
-  /api/invites/accept:
+      tags: [Super Admin]
+      summary: Get worker details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Worker details
+
+  /api/hub/unmarked/workers:
+    get:
+      tags: [Workers]
+      summary: Unmarked workers
+      responses:
+        "200":
+          description: List
+
+  /api/hub/workers/add:
     post:
-      summary: Accept invite
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
+      tags: [Workers]
+      summary: Add workers
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                invitationId:
-                  type: string
-            example:
-              invitationId: 01KEW878N408BAT3CFFYDH6FYN
-  /api/invites/reject:
-    post:
-      summary: Reject invite
-      responses: {}
-      tags:
-        - Team invite
-      security:
-        - BearerAuth: []
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/workers/requestDelete:
+    put:
+      tags: [Workers]
+      summary: Request worker delete
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                invitationId:
-                  type: string
-            example:
-              invitationId: 01KEW878N408BAT3CFFYDH6FYN
-  /api/orgs/01K9DA5HM0406JZ1PP322VA1M8/logo:
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/admin:
+    get:
+      tags: [Attendance]
+      summary: Admin attendance view
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance:
+    get:
+      tags: [Attendance]
+      summary: Attendance list
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/history:
+    get:
+      tags: [Attendance]
+      summary: Attendance history
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/trends:
+    get:
+      tags: [Attendance]
+      summary: Attendance trends
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/add:
+    post:
+      tags: [Attendance]
+      summary: Add attendance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/uniquedates:
+    get:
+      tags: [Attendance]
+      summary: Unique attendance dates
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/close:
+    put:
+      tags: [Attendance]
+      summary: Close attendance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/enable:
+    put:
+      tags: [Attendance]
+      summary: Enable attendance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/disable:
+    put:
+      tags: [Attendance]
+      summary: Disable attendance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/not-recorded:
     delete:
-      summary: delete logo
-      responses: {}
-      tags:
-        - company branding
-      security:
-        - BearerAuth: []
-    put:
-      summary: put company logo branding
-      responses: {}
-      tags:
-        - company branding
-      security:
-        - BearerAuth: []
-  /api/orgs/01K9DA5HM0406JZ1PP322VA1M8/details:
-    put:
-      summary: update company details
-      responses: {}
-      tags:
-        - company branding
-      security:
-        - BearerAuth: []
+      tags: [Attendance]
+      summary: Delete not-recorded attendance
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                name:
-                  type: string
-                address:
-                  type: string
-            example:
-              name: Guaranee Trust Bank
-              address: Gbagada
-    get:
-      summary: get company details
-      responses: {}
-      tags:
-        - company branding
-      security:
-        - BearerAuth: []
-  /api/orgs/01K9DA5HM0406JZ1PP322VA1M8/branding:
-    put:
-      summary: put company branding
-      responses: {}
-      tags:
-        - company branding
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                primaryHex:
-                  type: string
-                  format: color
-                secondaryHex:
-                  type: string
-                  format: color
-                revisionId:
-                  type: string
-            example:
-              primaryHex: '#0A84FF'
-              secondaryHex: '#111827'
-              revisionId: 01KAV3DSMXRCAC6VX7YXJ13X5M
-  /api/orgs/{COMPANY_ID}/board-members:
-    get:
-      summary: List board members
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-          example: '1'
-        - name: limit
-          in: query
-          schema:
-            type: integer
-          example: '10'
-        - name: sort
-          in: query
-          schema:
-            type: string
-          example: desc
-        - name: sortBy
-          in: query
-          schema:
-            type: string
-          example: createdAt
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-    post:
-      summary: create board members
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                firstName:
-                  type: string
-                lastName:
-                  type: string
-                email:
-                  type: string
-                  format: email
-                position:
-                  type: string
-                category:
-                  type: string
-                committee:
-                  type: string
-            example:
-              firstName: Peter
-              lastName: Grace
-              email: caracolasstore+12@gmail.com
-              position: Chairman
-              category: Executive director
-              committee: Advisory
-  /api/orgs/{COMPANY_ID}/board-members/01KBQKJ3D3ABZH0DWCN4R1PKYK/update:
-    patch:
-      summary: update board members
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                committewe:
-                  type: string
-            example:
-              committewe: Board Chairman
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/board-members/{memberId}/delete:
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/attendance/record:
     delete:
-      summary: delete board member
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/board-members/export:
-    get:
-      summary: export board members
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/board-members/bulk:
-    post:
-      summary: bulk create board members
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
+      tags: [Attendance]
+      summary: Delete attendance record
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                members:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      first_name:
-                        type: string
-                      last_name:
-                        type: string
-                      email:
-                        type: string
-                        format: email
-                      position:
-                        type: string
-                      category:
-                        type: string
-            example:
-              members:
-                - first_name: Dan
-                  last_name: Drew
-                  email: caracolasstore+12@gmail.com
-                  position: HR Manager
-                  category: Exec
-                - first_name: Neo
-                  last_name: Leo
-                  email: caracolasstore+13@gmail.com
-                  position: YTD
-                  category: Exec
-                - first_name: Dew
-                  last_name: Dan
-                  email: caracolasstore+11@gmail.com
-                  position: TRR
-                  category: Exec
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/board-members/csv/parse:
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/workers/generate/report:
     post:
-      summary: parse csv
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/board-members/template:
-    get:
-      summary: download template
-      responses: {}
-      tags:
-        - Board members
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/subscriptions:
-    get:
-      summary: fetch subscriptions
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing:
-    get:
-      summary: fetch billings
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-          example: '4'
-        - name: page
-          in: query
-          schema:
-            type: integer
-          example: '1'
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/billing/invoices/01KBZ3X4MT9NXGK8XPZG44PCR3/download:
-    get:
-      summary: download invoice
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-  /api/orgs/{COMPANY_ID}/billing/cards:
-    post:
-      summary: Add card
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
+      tags: [Reports]
+      summary: Generate workers report
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                subscriptionId:
-                  type: string
-                callbackUrl:
-                  type: string
-                  format: uri
-            example:
-              subscriptionId: 01KBZ406793TD6J80W17JKXWB0
-              callbackUrl: https://app.dgoval.com/card/callback
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing/cancel:
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/departments:
+    get:
+      tags: [Departments]
+      summary: List departments
+      responses:
+        "200":
+          description: OK
     post:
-      summary: cancel subscription
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
+      tags: [Departments]
+      summary: Add department
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                subscriptionId:
-                  type: string
-                reason:
-                  type: string
-            example:
-              subscriptionId: 01KBNFQ21BZP8Z8P564KS38H6N
-              reason: Too expensive
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing/cards/update:
+      responses:
+        "200":
+          description: OK
     put:
-      summary: update card
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
+      tags: [Departments]
+      summary: Update department
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                subscriptionId:
-                  type: string
-                paymentMethodId:
-                  type: string
-            example:
-              subscriptionId: 01KBZ406793TD6J80W17JKXWB0
-              paymentMethodId: 01KBZ408WB1SGJ1T50GZ1FK08G
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing/cards/verify-update:
-    get:
-      summary: verify update card
-      parameters:
-        - name: subscriptionId
-          in: query
-          schema:
-            type: string
-          example: 01KBZ406793TD6J80W17JKXWB0
-        - name: paymentMethodId
-          in: query
-          schema:
-            type: string
-          example: ntck716xmn6oakc
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing/cards/verify-add:
-    get:
-      summary: verify add card
-      parameters:
-        - name: reference
-          in: query
-          schema:
-            type: string
-          example: es0tpmix51
-        - name: appUrl
-          in: query
-          schema:
-            type: string
-          example: https://app.dgoval.com
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing/plan-change/initiate:
-    post:
-      summary: Upgrade plan
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                subscriptionId:
-                  type: string
-                newPlanId:
-                  type: string
-                type:
-                  type: string
-                callbackUrl:
-                  type: string
-                  format: uri
-            example:
-              subscriptionId: 01KBNFQ21BZP8Z8P564KS38H6N
-              newPlanId: 01KBNFD2T7SG9GN54CM8YRZV5J
-              type: upgrade
-              callbackUrl: https://app.dgoval.com/upgrade/callback
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/billing/plan-change/confirm:
-    get:
-      summary: Confirm Upgrade
-      parameters:
-        - name: planChangeRequestId
-          in: query
-          schema:
-            type: string
-          example: 01KBNG274MHJZ342S967TJNKEB
-        - name: reference
-          in: query
-          schema:
-            type: string
-          example: 1pfbhpw4ya
-        - name: redirect
-          in: query
-          schema:
-            type: string
-      responses: {}
-      tags:
-        - Billing and Subscription
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/frameworks/upload:
-    post:
-      summary: admin backoffice upload framework
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations:
-    post:
-      summary: create evaluation
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                description:
-                  type: string
-                startDate:
-                  type: string
-                  format: date
-                endDate:
-                  type: string
-                  format: date
-                frameworkIds:
-                  type: array
-                  items:
-                    type: string
-            example:
-              title: Q1A Evaluation
-              description: Evaluation for QA
-              startDate: '2025-12-31'
-              endDate: '2026-01-18'
-              frameworkIds:
-                - 01KE6PCKEFA440KGJAS4D4ZBRQ
-                - 01KE6PG5PVXNY873ZXTGXBQNKW
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-    get:
-      summary: list evaluations
-      parameters:
-        - name: page
-          in: query
-          required: false
-          deprecated: false
-          schema: {}
-          example: '1'
-        - name: limit
-          in: query
-          required: false
-          deprecated: false
-          schema: {}
-          example: '10'
-        - name: timeFrame
-          in: query
-          required: false
-          deprecated: false
-          schema: {}
-          example: last-7-days
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/update:
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/departments/toggle-status:
     put:
-      summary: update evaluation
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
+      tags: [Departments]
+      summary: Toggle department status
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              properties:
-                title:
-                  type: string
-                description:
-                  type: string
-                startDate:
-                  type: string
-                  format: date
-                endDate:
-                  type: string
-                  format: date
-                frameworkIds:
-                  type: array
-                  items:
-                    type: string
-            example:
-              title: QA1 Evaluation
-              description: Evaluation for QA
-              startDate: '2026-01-31'
-              endDate: '2026-02-18'
-              frameworkIds:
-                - 01KE6PCKEFA440KGJAS4D4ZBRQ
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/evaluations/{evaluationId}/dashboard:
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/departments/{id}/delete:
+    delete:
+      tags: [Departments]
+      summary: Delete department
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+
+  /api/hub/trainings:
     get:
-      summary: evaluation dashboard
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/approval/decide:
-    post:
-      summary: approve evaluation
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                approvalId:
-                  type: string
-                accept:
-                  type: boolean
-                reason:
-                  type: string
-            example:
-              approvalId: 01KEAPT780MWRMKMS47TTD6F9D
-              accept: true
-              reason: Well done
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/backoffice/frameworks:
-    get:
-      summary: list frameworks
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/cancel:
-    post:
-      summary: cancel evaluation
-      responses: {}
-      tags:
-        - Evaluations
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/orgs/{evaluationId}/evaluations/documents:
-    get:
-      summary: List document requests for evaluation
+      tags: [Trainings]
+      summary: Training dashboard (list + metrics)
       parameters:
         - name: page
           in: query
-          schema:
-            type: integer
-          example: '1'
-        - name: limit
+          schema: { type: integer, default: 1 }
+        - name: per_page
           in: query
-          schema:
-            type: integer
-          example: '20'
+          schema: { type: integer, default: 20 }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
         - name: status
           in: query
           schema:
             type: string
-          example: not_submitted
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/documents/request:
+            enum: [upcoming, ongoing, completed]
+      responses:
+        "200":
+          description: List and metrics
     post:
-      summary: Request document
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
+      tags: [Trainings]
+      summary: Create training (Super Admin)
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                evaluationId:
-                  type: string
-                publicUrl:
-                  type: string
-                  format: uri
-                title:
-                  type: string
-                items:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      templateId:
-                        type: string
-                      title:
-                        type: string
-                      description:
-                        type: string
-                providers:
-                  type: object
-                  properties:
-                    providerType:
-                      type: string
-                    membershipId:
-                      type: string
-                    firstName:
-                      type: string
-                    lastName:
-                      type: string
-                    email:
-                      type: string
-                      format: email
-            example:
-              evaluationId: 01KE1WE7C4WBXY1C0SHVW9TX90
-              publicUrl: https://app.dgoval.com
-              title: Annual Performance Review Q4 2025
-              items:
-                - templateId: 01KBNYSVJC655WMQ25QY1EG47E
-                  title: Audit Findings Summary for Corporate Governance
-                  description: Findings summary templatee
-                - templateId: 01KBNYSW0PZYVQTQ32478D7Y4Z
-                  title: Board Member Directory
-                  description: Board member names, roles and contact details
-                - templateId: 01KBNYSTNG3943VKQVHGQJK04V
-                  title: Board Performance Evaluation Report
-                  description: Template for board performance evaluation report
-              providers:
-                providerType: team
-                membershipId: 01KB7H5MS3BV54K7JE427JBP7C
-                firstName: Porro
-                lastName: Colas
-                email: caracolasstore+6@gmail.com
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/documents/re-request:
-    post:
-      summary: Re Request rejected document
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                requestItemId:
-                  type: string
-                publicUrl:
-                  type: string
-                  format: uri
-                providerId:
-                  type: string
-            example:
-              requestItemId: ''
-              publicUrl: https://app.dgoval.com
-              providerId: ''
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/documents/{COMPANY_ID}/templates:
+              $ref: "#/components/schemas/CreateTrainingRequest"
+      responses:
+        "201":
+          description: training_id, public_id, registration_link
+
+  /api/hub/trainings/{id}:
     get:
-      summary: list document templates
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/evaluations/respondent/documents/requests:
-    get:
-      summary: List requested documents for respondents
+      tags: [Trainings]
+      summary: Training detail (admin)
       parameters:
-        - name: token
-          in: query
-          schema:
-            type: string
-          example: b38a25dd8064ad4ed54eeb9b2396e10263d325a253fe0f8f389c93889c6517b4
-      responses: {}
-      tags:
-        - Evaluation Documents
-  /api/respond/documents/{token}/upload:
-    post:
-      summary: Upload document by respondent
-      responses: {}
-      tags:
-        - Evaluation Documents
-    parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{token}}'
-  /api/respond/documents/submit:
-    post:
-      summary: Submit documents
-      responses: {}
-      tags:
-        - Evaluation Documents
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token:
-                  type: string
-            example:
-              token: b38a25dd8064ad4ed54eeb9b2396e10263d325a253fe0f8f389c93889c6517b4
-  /api/orgs/documents/{requestItemId}/request-item:
-    delete:
-      summary: Delete uploaded document
-      responses: {}
-      tags:
-        - Evaluation Documents
-    parameters:
-      - name: requestItemId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{requestItemId}}'
-  /api/orgs/documents/{uploadId}/document/uploads:
-    get:
-      summary: View document
-      responses: {}
-      tags:
-        - Evaluation Documents
-    parameters:
-      - name: uploadId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{uploadId}}'
-  /api/orgs/{COMPANY_ID}/documents/uploads/review:
-    post:
-      summary: Review (Accept) Document
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                accept:
-                  type: boolean
-                uploadId:
-                  type: string
-            example:
-              accept: true
-              uploadId: 01KEKTHXYDP10FTXYBTJQJ864A
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/documents/manual/templates:
-    post:
-      summary: Manua Add Document Template
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                documents:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      title:
-                        type: string
-            example:
-              documents:
-                - title: New Document manually V1
-                - title: New Document manually V2
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/evaluations/documents/{documentRequestItemId}/item:
-    delete:
-      summary: Remove requested document
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: documentRequestItemId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{documentRequestItemId}}'
-  /api/orgs/{COMPANY_ID}/documents/upload-on-behalf:
-    post:
-      summary: upload on behalf
-      parameters:
-        - name: providerId
-          in: query
-          schema:
-            type: string
-          example: 01KE1WSCYWFCW25RVPJ6Z1M6GW
-        - name: documentRequestItemId
-          in: query
-          schema:
-            type: string
-          example: 01KE1WSCYRKT8QH6PQP4JHHFZR
-      responses: {}
-      tags:
-        - Evaluation Documents
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations/desk-review/start:
-    post:
-      summary: Start Desk Review
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                evaluationId:
-                  type: string
-            example:
-              evaluationId: 01KEWBTDTSGHWSDJ6XR5SYPJDM
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/desk-reviews/answers:
-    put:
-      summary: Save answer
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                deskReviewId:
-                  type: string
-                frameworkId:
-                  type: string
-                sectionId:
-                  type: string
-                questionId:
-                  type: string
-                answer:
-                  type: string
-                comment:
-                  type: string
-            example:
-              deskReviewId: 01KEWBTZJ0P2ZCB6667BE61B23
-              frameworkId: 01KE6PG5PVXNY873ZXTGXBQNKW
-              sectionId: 01KE6PG5PXTC9H9VEY7PZZVD4R
-              questionId: 01KE6PG5N289S2XK8D1Q351V39
-              answer: 'yes'
-              comment: >-
-                Interlocking directorships comply with approved limits within
-                the group
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/desk-reviews/submit:
-    post:
-      summary: submit desk review
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                deskReviewId:
-                  type: string
-                reviewLink:
-                  type: string
-                  format: uri
-            example:
-              deskReviewId: 01KEKTQ9J1BTYRJR8GQHZ5M1ZG
-              reviewLink: https://app.dgoval.com/evaluation/deskreview
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/desk-reviews/evidence:
-    post:
-      summary: upload evidence
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{companyId}/desk-reviews/evidence/{evidenceId}:
-    delete:
-      summary: Remove Evidence
-      parameters:
-        - name: evidenceId
+        - name: id
           in: path
           required: true
-          schema:
-            type: string
-          example: '{{evidenceId}}'
-        - name: COMPANY_ID
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Full detail
+
+  /api/hub/trainings/{id}/enrollees:
+    get:
+      tags: [Trainings]
+      summary: List enrollees
+      parameters:
+        - name: id
           in: path
           required: true
-          schema:
-            type: string
-          example: '{{COMPANY_ID}}'
-      tags:
-        - Desk Review
-  /api/orgs/{COMPANY_ID}/desk-reviews:
-    get:
-      summary: Get Desk review
-      parameters:
-        - name: evaluationId
-          in: query
-          schema:
-            type: string
-          example: '{{evaluationId}}'
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                evaluationId:
-                  type: string
-            example:
-              evaluationId: 01KBCTP885JSAPQ0RPDNE6C7PR
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/desk-reviews/approve:
-    post:
-      summary: Approve review
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                deskReviewId:
-                  type: string
-            example:
-              deskReviewId: 01KEKTQ9J1BTYRJR8GQHZ5M1ZG
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/desk-reviews/reject:
-    post:
-      summary: Reject review
-      responses: {}
-      tags:
-        - Desk Review
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                deskReviewId:
-                  type: string
-                reason:
-                  type: string
-            example:
-              deskReviewId: 01KBJBAN6Q1DEM2SYYWJWCKJ4W
-              reason: Rubbish
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/metadata:
-    post:
-      summary: Save Evaluation survey metadata
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                  format: style
-                description:
-                  type: string
-                startDate:
-                  type: string
-                  format: date-time
-                endDate:
-                  type: string
-                  format: date-time
-                evaluationId:
-                  type: string
-            example:
-              title: 'Board Evaluation: 2025 Annual End'
-              description: Annual performance evaluation for board members
-              startDate: '2025-12-31T00:00:00.000Z'
-              endDate: '2026-01-20T23:59:59.999Z'
-              evaluationId: 01KEKTA7TM97CDHT39XGA2GKM6
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/{surveyId}/metadata:
-    put:
-      summary: Update survey metadata
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                  format: style
-                description:
-                  type: string
-            example:
-              title: 'Board Evaluation: 2025 Annual V2'
-              description: Annual performance evaluation for board members
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: surveyId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{surveyId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/{surveyId}/questions:
-    put:
-      summary: update survey questions
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                questions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      id:
-                        type: string
-                      position:
-                        type: integer
-                      text:
-                        type: string
-                      type:
-                        type: string
-                      skippable:
-                        type: boolean
-                      helpText:
-                        type: string
-                      likert:
-                        type: object
-                        properties:
-                          scaleMinLabel:
-                            type: string
-                          scaleMaxLabel:
-                            type: string
-                          scalePoints:
-                            type: integer
-            example:
-              questions:
-                - id: 01KC1X24EV2CHVDESHF43NAWP9
-                  position: 1
-                  text: >-
-                    What is your overall rating of the board's effectiveness
-                    this year?
-                  type: likert
-                  skippable: false
-                  helpText: 1 = Very Poor, 5 = Excellent
-                  likert:
-                    scaleMinLabel: Very Poor
-                    scaleMaxLabel: Excellent
-                    scalePoints: 5
-                - id: 01KC1X24JGVGB5VC3SB3BCDZKH
-                  position: 2
-                  text: Has the board provided clear strategic direction?
-                  type: singleChoice
-                  skippable: false
-                  helpText: Select the option that best reflects your view
-                  options:
-                    - position: 1
-                      label: Strongly disagree
-                      value: strongly_disagree
-                      isDefault: false
-                    - position: 2
-                      label: Disagree
-                      value: disagree
-                      isDefault: false
-                    - position: 3
-                      label: Neutral
-                      value: neutral
-                      isDefault: false
-                    - position: 4
-                      label: Agree
-                      value: agree
-                      isDefault: false
-                    - position: 5
-                      label: Strongly agree
-                      value: strongly_agree
-                      isDefault: false
-                  likert: null
-                - id: 01KC1X24P67Y5Z4HDZCPTJ0WGH
-                  position: 3
-                  text: Please provide any additional comments (optional)
-                  type: longText
-                  skippable: true
-                  helpText: You may leave this blank if you have no further comments
-                  options: null
-                  likert: null
-                - id: null
-                  position: 4
-                  text: Do you feel the board meetings are productive?
-                  type: yesNo
-                  skippable: false
-                  helpText: null
-                  options: null
-                  likert: null
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: surveyId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{surveyId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/draft/autosave:
-    post:
-      summary: Auto save evaluation survey
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                draftId:
-                  type: string
-                questions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      id:
-                        type: string
-                      position:
-                        type: integer
-                      text:
-                        type: string
-                      type:
-                        type: string
-                      required:
-                        type: boolean
-                      skippable:
-                        type: boolean
-                      helpText:
-                        type: string
-                      likert:
-                        type: object
-                        properties:
-                          scaleMinLabel:
-                            type: string
-                          scaleMaxLabel:
-                            type: string
-                          scalePoints:
-                            type: integer
-            example:
-              draftId: 01KDSWDMVTVZN3W3H6MJ8N6AS6
-              questions:
-                - id: 01KBR50ENHS4JMTRCYKMV7EWS2
-                  position: 1
-                  text: How clear are the team's goals?
-                  type: likert
-                  required: true
-                  skippable: false
-                  helpText: 1 = Strongly disagree, 5 = Strongly agree
-                  likert:
-                    scaleMinLabel: Strongly disagree
-                    scaleMaxLabel: Strongly agree
-                    scalePoints: 5
-                - id: 01KBR50FBHHM66P8C02H2Q7DQ9
-                  position: 2
-                  text: Which leadership areas need improvement?
-                  type: longText
-                  required: false
-                  skippable: true
-                  helpText: Add as much detail as possible
-                  likert: null
-                - id: 01KBR50FNQSCK81G5CKJC984T5
-                  position: 3
-                  text: State your department
-                  type: shortText
-                  required: true
-                  skippable: false
-                  helpText: Keep it short
-                  likert: null
-                - id: 01KBR50G06M5BNW06C9X7F27CP
-                  position: 4
-                  text: Do you receive clear direction from leadership?
-                  type: yesNo
-                  required: true
-                  skippable: false
-                  helpText: null
-                  likert: null
-                - id: 01KBR50GA9V8A6ERX3G838GCK9
-                  position: 5
-                  text: Rate the effectiveness of leadership communication
-                  type: singleChoice
-                  required: true
-                  skippable: false
-                  helpText: null
-                  options:
-                    - position: 1
-                      label: Poor
-                      value: poor
-                      isDefault: false
-                    - position: 2
-                      label: Fair
-                      value: fair
-                      isDefault: false
-                    - position: 3
-                      label: Good
-                      value: good
-                      isDefault: true
-                    - position: 4
-                      label: Excellent
-                      value: excellent
-                      isDefault: false
-                  likert: null
-                - id: 01KBR50H04QYD4A23NDEYZEM7X
-                  position: 6
-                  text: Select the tools you use weekly
-                  type: multipleChoice
-                  required: false
-                  skippable: true
-                  helpText: Choose all that apply
-                  options:
-                    - position: 1
-                      label: Slack
-                      value: slack
-                      isDefault: false
-                    - position: 2
-                      label: Teams
-                      value: teams
-                      isDefault: false
-                    - position: 3
-                      label: Zoom
-                      value: zoom
-                      isDefault: false
-                    - position: 4
-                      label: Email
-                      value: email
-                      isDefault: false
-                  likert: null
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/draft/publish:
-    post:
-      summary: Publish survey template
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                draftId:
-                  type: string
-                questions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      position:
-                        type: integer
-                      text:
-                        type: string
-                      type:
-                        type: string
-                      skippable:
-                        type: boolean
-                      likert:
-                        type: object
-                        properties:
-                          scaleMinLabel:
-                            type: string
-                          scaleMaxLabel:
-                            type: string
-                          scalePoints:
-                            type: integer
-            example:
-              draftId: 01KEKYWZ0XSQCZ2EXVS2FFQ6RS
-              questions:
-                - position: 1
-                  text: What is your overall rating of the board's effectiveness?
-                  type: likert
-                  skippable: false
-                  likert:
-                    scaleMinLabel: Very Poor
-                    scaleMaxLabel: Excellent
-                    scalePoints: 5
-                - position: 2
-                  text: Has the board provided clear strategic direction?
-                  type: singleChoice
-                  skippable: false
-                  options:
-                    - position: 1
-                      label: Strongly disagree
-                      value: strongly_disagree
-                    - position: 2
-                      label: Disagree
-                      value: disagree
-                    - position: 3
-                      label: Neutral
-                      value: neutral
-                    - position: 4
-                      label: Agree
-                      value: agree
-                    - position: 5
-                      label: Strongly agree
-                      value: strongly_agree
-                - position: 3
-                  text: Please provide any additional comments (optional)
-                  type: longText
-                  skippable: true
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations/{surveyId}/surveys/view:
-    get:
-      summary: get evaluation survey
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: surveyId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{surveyId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/surveys:
-    get:
-      summary: List evaluation surveys
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/send:
-    post:
-      summary: send survey to receipients
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                surveyId:
-                  type: string
-                surveyAssessmentLink:
-                  type: string
-                  format: uri
-                recipients:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      id:
-                        type: string
-                      email:
-                        type: string
-                        format: email
-            example:
-              surveyId: 01KEKYWZ0XSQCZ2EXVS2FFQ6RR
-              surveyAssessmentLink: https://app.dgoval.com/survey/respond
-              recipients:
-                - id: 01KBQKG9TR7DYHJ67XY0TH8DYV
-                  email: caracolasstore+10@gmail.com
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/{surveyId}/remind:
-    post:
-      summary: Send reminders
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                surveyAssessmentLink:
-                  type: string
-                  format: uri
-                participantIds:
-                  type: array
-                  items:
-                    type: string
-            example:
-              surveyAssessmentLink: https://app.dgoval.com/survey/respond
-              participantIds:
-                - 01KBQKG9TR7DYHJ67XY0TH8DYV
-                - 01KBQKHAAB3Q2TWAAT5X5YG7KP
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: surveyId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{surveyId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/{templateId}/template:
-    get:
-      summary: Create Survey From  template Get Started endpoint
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: templateId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{templateId}}'
-  /api/orgs/evaluations/surveys/{token}/respondent:
-    get:
-      summary: Get survey for respondent
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{token}}'
-  /api/orgs/evaluations/surveys/respondent/answers:
-    put:
-      summary: Respondent auto save answers
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token:
-                  type: string
-                answersPayload:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      questionId:
-                        type: string
-                      answer:
-                        type: string
-                        format: utc-millisec
-                      comment:
-                        type: string
-                submit:
-                  type: boolean
-            example:
-              token: 512bef37380cfc1ef935a983e803ce5a80ffd4f23e369405
-              answersPayload:
-                - questionId: 01KDSWPSRBPT3V7MDTA8TZYZTJ
-                  answer: '4'
-                  comment: Board is generally effective but can still improve.
-                - questionId: 01KDSWPSRN1G7QKCW8SATVJHD2
-                  answer: agree
-                  comment: Strategic direction is mostly clear.
-                - questionId: 01KDSWPSRQ3530WWW5MSP6SKJK
-                  answer: No further comments at this time.
-                  comment: null
-              submit: false
-  /api/orgs/{COMPANY_ID}/evaluations/surveys/{surveyId}/participants/{participantId}:
-    delete:
-      summary: Remove participant from survey
-      responses: {}
-      tags:
-        - Evaluation Surveys
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: surveyId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{surveyId}}'
-      - name: participantId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{participantId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/interviews:
-    get:
-      summary: List stakeholder interviews
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-          example: '5'
+          schema: { type: integer }
         - name: page
           in: query
-          schema:
-            type: integer
-          example: '1'
-        - name: search
+          schema: { type: integer }
+        - name: per_page
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Paginated enrollees
+
+  /api/hub/trainings/{id}/register:
+    post:
+      tags: [Trainings]
+      summary: Register for training (self or nominate via worker_id)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterTrainingRequest"
+      responses:
+        "200":
+          description: Already enrolled
+        "201":
+          description: Registered
+
+  /api/hub/trainings/{id}/nominate:
+    post:
+      tags: [Trainings]
+      summary: Nominate workers (bulk)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NominateWorkersRequest"
+      responses:
+        "200":
+          description: Per-worker results
+
+  /api/hub/trainings/{id}/modules:
+    post:
+      tags: [Trainings]
+      summary: Add curriculum module
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingModuleRequest"
+      responses:
+        "201":
+          description: Module created
+
+  /api/hub/trainings/{id}/modules/{moduleId}/lessons:
+    post:
+      tags: [Trainings]
+      summary: Add lesson to module
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: moduleId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingLessonRequest"
+      responses:
+        "201":
+          description: Lesson created
+
+  /api/hub/trainings/{id}/curriculum:
+    get:
+      tags: [Trainings]
+      summary: Get curriculum (admin/dashboard)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Modules and lessons
+
+  /api/hub/trainings/{id}/worker-curriculum:
+    get:
+      tags: [Trainings]
+      summary: Worker curriculum (enrolled only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Modules and lessons
+
+  /api/hub/trainings/{id}/participation:
+    post:
+      tags: [Trainings]
+      summary: Record session participation
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParticipationRequest"
+      responses:
+        "200":
+          description: Recorded or updated
+
+  /api/hub/trainings/{id}/department-assignments:
+    get:
+      tags: [Trainings]
+      summary: List post-training department assignments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Assignments with progress
+    post:
+      tags: [Trainings]
+      summary: Create department assignment
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepartmentAssignmentRequest"
+      responses:
+        "201":
+          description: Created
+
+  /api/hub/users/{id}/trainings:
+    get:
+      tags: [Users]
+      summary: Trainings for a worker (user id = worker id)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Trainings list
+
+  /api/hub/users/{id}/training-metrics:
+    get:
+      tags: [Users]
+      summary: Training metrics for a worker
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Metrics object
+
+  /api/hub/trainings/{id}/enrollments/{enrollmentId}/complete:
+    post:
+      tags: [Trainings]
+      summary: Mark enrollment complete (issue certificate)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: enrollmentId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Completion + certificate info
+
+  /api/hub/trainings/{id}/certificates:
+    get:
+      tags: [Trainings]
+      summary: List certificates for training
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Certificate rows
+
+  /api/hub/trainings/{id}/stream-sessions:
+    post:
+      tags: [Trainings]
+      summary: Create stream session metadata
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamSessionRequest"
+      responses:
+        "201":
+          description: Stream session row
+
+  /api/hub/trainings/{id}/stream-sessions/{streamSessionId}:
+    patch:
+      tags: [Trainings]
+      summary: Update stream session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: streamSessionId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchStreamSessionRequest"
+      responses:
+        "200":
+          description: Updated session
+
+  /api/hub/trainings/{id}/recordings:
+    get:
+      tags: [Trainings]
+      summary: List recordings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: library_only
           in: query
           schema:
             type: string
-          example: audit
-      responses: {}
-      tags:
-        - Stakeholders interview
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
+            enum: ["true", "false"]
+            default: "true"
+          description: Admins may set false to include non-library items
+      responses:
+        "200":
+          description: Recording list
     post:
-      summary: Create stakeholder interview schedule
-      responses: {}
-      tags:
-        - Stakeholders interview
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-            example: "{\r\n    \"title\": \"Audit Chair Stakeholder Interview\",\r\n    \"boardMemberId\": \"01KBWATFMM5RCAQS74KE0BPSRW\",\r\n    //   \"scheduledDate\": \"2026-12-29\",\r\n    \"scheduledDate\": \"20-02-2026\",\r\n    \"scheduledTime\": \"11:00:00\",\r\n    \"type\": \"online\",\r\n    \"channel\": \"Zoom\",\r\n    \"description\": \"Initial stakeholder engagement interview with the audit chair.\"\r\n}"
-  /api/orgs/{COMPANY_ID}/interviews/{interviewId}/view:
-    get:
-      summary: Get interview details
-      responses: {}
-      tags:
-        - Stakeholders interview
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: interviewId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{interviewId}}'
-  /api/orgs/{COMPANY_ID}/interviews/{interviewId}/update:
-    put:
-      summary: Update stakeholder interview metadata
-      responses: {}
-      tags:
-        - Stakeholders interview
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                scheduledTime:
-                  type: string
-                  format: style
-                scheduledDate:
-                  type: string
-                description:
-                  type: string
-            example:
-              title: Board Chair Stakeholder Interview
-              scheduledTime: '15:00'
-              scheduledDate: 20-02-2026
-              description: Initial stakeholder engagement interview with the board chair.
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: interviewId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{interviewId}}'
-  /api/orgs/{COMPANY_ID}/interviews/{interviewId}/save-summary:
-    put:
-      summary: Save summary
-      responses: {}
-      tags:
-        - Stakeholders interview
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                summary:
-                  type: string
-            example:
-              summary: >-
-                I had a call with Gad,  chairman and the compliance score
-                matched what was expected. They explained that every board
-                appointment followed the cbn corporate gorvenance. We also added
-                that family appointment was stringly frowned upon
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: interviewId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{interviewId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/report/generate:
-    post:
-      summary: Trigger generate report async
-      responses: {}
-      tags:
-        - Evaluations Report
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                companyId:
-                  type: string
-                evaluationId:
-                  type: string
-            example:
-              companyId: 01K9DA5HM0406JZ1PP322VA1M8
-              evaluationId: 01KEKTA7TM97CDHT39XGA2GKM6
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/orgs/{COMPANY_ID}/reports/{reportId}/preview:
-    get:
-      summary: preview report
+      tags: [Trainings]
+      summary: Add recording to library
       parameters:
-        - name: includeNotes
-          in: query
-          schema:
-            type: boolean
-          example: 'true'
-      responses: {}
-      tags:
-        - Evaluations Report
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: reportId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{reportId}}'
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/report:
-    put:
-      summary: Edit report
-      responses: {}
-      tags:
-        - Evaluations Report
-      security:
-        - BearerAuth: []
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                document:
-                  type: object
-                  properties:
-                    meta:
-                      type: object
-                      properties:
-                        orgName:
-                          type: string
-                        evaluationTitle:
-                          type: string
-                        period:
-                          type: string
-                        primaryContact:
-                          type: string
-                        overallComplianceScore:
-                          type: number
-                    tableOfContents:
-                      type: object
-                      properties:
-                        items:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              number:
-                                type: integer
-                              title:
-                                type: string
-                              page:
-                                nullable: true
-                    sections:
-                      type: object
-                      properties:
-                        recommendationsRoadmapCustom:
-                          type: object
-                          properties:
-                            overview:
-                              type: string
-                            keyFindings:
-                              type: array
-                              items:
-                                type: string
-                            summaryRecommendations:
-                              type: array
-                              items:
-                                type: string
-                            overallScoreComment:
-                              type: string
-                        executiveSummary:
-                          type: object
-                          properties:
-                            overview:
-                              type: string
-                            keyFindings:
-                              type: array
-                              items:
-                                type: string
-                            summaryRecommendations:
-                              type: array
-                              items:
-                                type: string
-                            overallScoreComment:
-                              type: string
-                        introduction:
-                          type: object
-                          properties:
-                            context:
-                              type: string
-                            purpose:
-                              type: string
-                            scope:
-                              type: string
-                            objectives:
-                              type: array
-                              items:
-                                type: string
-                        methodology:
-                          type: object
-                          properties:
-                            overview:
-                              type: string
-                            steps:
-                              type: array
-                              items:
-                                type: string
-                            participantSummary:
-                              type: string
-                            methods:
-                              type: array
-                              items:
-                                type: string
-                            limitations:
-                              type: array
-                              items:
-                                type: string
-                        frameworkResults:
-                          type: object
-                          properties:
-                            frameworks:
-                              type: array
-                              items:
-                                type: object
-                                properties:
-                                  frameworkId:
-                                    type: string
-                                  name:
-                                    type: string
-                                  narrative:
-                                    type: string
-                                  sumScore:
-                                    type: string
-                                    format: utc-millisec
-                                  totalQuestions:
-                                    type: integer
-                                  compliancePercent:
-                                    type: string
-                                  overallScore:
-                                    type: number
-                                  keyStrengths:
-                                    type: array
-                                    items:
-                                      type: string
-                                  keyGaps:
-                                    type: array
-                                    items:
-                                      type: string
-                            resultsSummary:
-                              type: string
-                              format: style
-                            heatmapExplanation:
-                              type: string
-                        surveyInsights:
-                          type: object
-                          properties:
-                            overview:
-                              type: string
-                            keyThemes:
-                              type: array
-                              items: {}
-                            observations:
-                              type: string
-                            notableQuotes:
-                              type: array
-                              items: {}
-                        interviewInsights:
-                          type: object
-                          properties:
-                            overview:
-                              type: string
-                            themes:
-                              type: array
-                              items: {}
-                            observations:
-                              type: string
-                            boardDynamics:
-                              type: string
-                              format: style
-                        strengths:
-                          type: object
-                          properties:
-                            narrative:
-                              type: string
-                            aspects:
-                              type: array
-                              items:
-                                type: string
-                            items:
-                              type: array
-                              items:
-                                type: string
-                        areasForImprovement:
-                          type: object
-                          properties:
-                            narrative:
-                              type: string
-                            aspects:
-                              type: array
-                              items:
-                                type: string
-                            items:
-                              type: array
-                              items:
-                                type: object
-                                properties:
-                                  area:
-                                    type: string
-                                  issue:
-                                    type: string
-                                  recommendation:
-                                    type: string
-                                  expectedBenefit:
-                                    type: string
-                        focusAreasNextYear:
-                          type: object
-                          properties:
-                            narrative:
-                              type: string
-                            priorities:
-                              type: array
-                              items:
-                                type: string
-                            items:
-                              type: array
-                              items:
-                                type: string
-                        recommendationsRoadmap:
-                          type: object
-                          properties:
-                            narrative:
-                              type: string
-                            timeline:
-                              type: array
-                              items:
-                                type: object
-                                properties:
-                                  period:
-                                    type: string
-                                  actionItems:
-                                    type: array
-                                    items:
-                                      type: string
-                            responsibility:
-                              type: array
-                              items:
-                                type: string
-                            items:
-                              type: array
-                              items:
-                                type: object
-                                properties:
-                                  recommendation:
-                                    type: string
-                                  owner:
-                                    type: string
-                                  timeline:
-                                    type: string
-                                  priority:
-                                    type: string
-                        appendices:
-                          type: object
-                          properties:
-                            notes:
-                              type: string
-                            frameworkScores:
-                              type: array
-                              items:
-                                type: object
-                                properties:
-                                  frameworkId:
-                                    type: string
-                                  frameworkName:
-                                    type: string
-                                  sumScore:
-                                    type: string
-                                    format: utc-millisec
-                                  totalQuestions:
-                                    type: integer
-                                  compliancePercent:
-                                    type: string
-                            evidenceHighlights:
-                              type: array
-                              items: {}
-            example:
-              document:
-                meta:
-                  orgName: ABC Corporation
-                  evaluationTitle: Board Governance Evaluation 2025
-                  period: 31 December 2024 - 18 January 2025
-                  primaryContact: Dr. Jane Doe, Company Secretary
-                  overallComplianceScore: 79.5
-                tableOfContents:
-                  items:
-                    - number: 1
-                      title: Executive Summary
-                      page: null
-                    - number: 2
-                      title: Introduction
-                      page: null
-                    - number: 3
-                      title: Methodology
-                      page: null
-                    - number: 4
-                      title: Framework Results
-                      page: null
-                    - number: 5
-                      title: Survey Insights
-                      page: null
-                    - number: 6
-                      title: Interview Insights
-                      page: null
-                    - number: 7
-                      title: Strengths
-                      page: null
-                    - number: 8
-                      title: Areas for Improvement
-                      page: null
-                    - number: 9
-                      title: Focus Areas Next Year
-                      page: null
-                    - number: 10
-                      title: Recommendations Roadmap
-                      page: null
-                    - number: 11
-                      title: Recommendations Roadmap Custom
-                      page: null
-                    - number: 12
-                      title: Appendices
-                      page: null
-                sections:
-                  recommendationsRoadmapCustom:
-                    overview: >-
-                      This governance evaluation report presents an independent
-                      assessment of the board's effectiveness and compliance
-                      with leading governance practices. The evaluation was
-                      conducted over the period from 31 December 2024 to 18
-                      January 2025, covering critical governance dimensions
-                      including board structure, risk oversight, strategic
-                      direction, and accountability mechanisms. The assessment
-                      reveals a board that demonstrates strong foundational
-                      governance practices with an overall compliance score of
-                      79.5%, alongside identified opportunities for enhancement
-                      in documentation processes and succession planning.
-                    keyFindings:
-                      - >-
-                        The board achieved a compliance rate of 77.27% on core
-                        governance practices, indicating strong foundational
-                        alignment with governance standards.
-                      - >-
-                        The board structure generally aligns with leading
-                        practices, with clear separation of roles between the
-                        Chair and Chief Executive Officer.
-                      - >-
-                        Risk oversight mechanisms are in place, though there is
-                        room for formalization and more structured
-                        documentation.
-                      - >-
-                        Board engagement in the evaluation process was
-                        exemplary, with 100% participation from board members.
-                      - >-
-                        UPDATED: Succession planning processes have been
-                        strengthened following recent board member transitions,
-                        demonstrating adaptive governance.
-                    summaryRecommendations:
-                      - >-
-                        Enhance board documentation processes to ensure
-                        comprehensive record-keeping of board decisions and
-                        discussions.
-                      - >-
-                        Institute additional board training modules focusing on
-                        emerging governance trends and regulatory requirements.
-                      - >-
-                        UPDATED: Develop and implement a formalized director
-                        induction program to support new board members
-                        effectively.
-                      - >-
-                        Establish more structured risk reporting mechanisms to
-                        the board.
-                    overallScoreComment: >-
-                      The board demonstrates strong overall compliance with
-                      governance principles, with particular strength in board
-                      structure and engagement. The identified areas for
-                      improvement are manageable and present opportunities for
-                      enhanced governance maturity.
-                  executiveSummary:
-                    overview: >-
-                      This governance evaluation report presents an independent
-                      assessment of the board's effectiveness and compliance
-                      with leading governance practices. The evaluation was
-                      conducted over the period from 31 December 2024 to 18
-                      January 2025, covering critical governance dimensions
-                      including board structure, risk oversight, strategic
-                      direction, and accountability mechanisms. The assessment
-                      reveals a board that demonstrates strong foundational
-                      governance practices with an overall compliance score of
-                      79.5%, alongside identified opportunities for enhancement
-                      in documentation processes and succession planning.
-                    keyFindings:
-                      - >-
-                        The board achieved a compliance rate of 77.27% on core
-                        governance practices, indicating strong foundational
-                        alignment with governance standards.
-                      - >-
-                        The board structure generally aligns with leading
-                        practices, with clear separation of roles between the
-                        Chair and Chief Executive Officer.
-                      - >-
-                        Risk oversight mechanisms are in place, though there is
-                        room for formalization and more structured
-                        documentation.
-                      - >-
-                        Board engagement in the evaluation process was
-                        exemplary, with 100% participation from board members.
-                      - >-
-                        UPDATED: Succession planning processes have been
-                        strengthened following recent board member transitions,
-                        demonstrating adaptive governance.
-                    summaryRecommendations:
-                      - >-
-                        Enhance board documentation processes to ensure
-                        comprehensive record-keeping of board decisions and
-                        discussions.
-                      - >-
-                        Institute additional board training modules focusing on
-                        emerging governance trends and regulatory requirements.
-                      - >-
-                        UPDATED: Develop and implement a formalized director
-                        induction program to support new board members
-                        effectively.
-                      - >-
-                        Establish more structured risk reporting mechanisms to
-                        the board.
-                    overallScoreComment: >-
-                      The board demonstrates strong overall compliance with
-                      governance principles, with particular strength in board
-                      structure and engagement. The identified areas for
-                      improvement are manageable and present opportunities for
-                      enhanced governance maturity.
-                  introduction:
-                    context: >-
-                      This evaluation was conducted in a context of ongoing
-                      regulatory evolution in the Nigerian corporate governance
-                      landscape, with increased emphasis on board
-                      accountability, transparency, and risk management. The
-                      evaluation period coincided with significant
-                      organizational changes, including the appointment of new
-                      board members and the establishment of additional board
-                      committees to address emerging governance requirements.
-                    purpose: >-
-                      The purpose of this evaluation is to objectively assess
-                      the effectiveness of the board's governance practices,
-                      identify areas of strength, and highlight opportunities
-                      for improvement. The assessment provides the board with
-                      actionable insights to enhance its governance framework
-                      and ensure alignment with both regulatory requirements and
-                      leading practices.
-                    scope: >-
-                      The review covered board structure, governance policies,
-                      risk oversight, strategic direction, board composition and
-                      diversity, director independence, committee effectiveness,
-                      and board evaluation processes. The assessment was based
-                      on desk review of governance documents, framework-based
-                      questionnaire responses, and available evidence of
-                      governance practices.
-                    objectives:
-                      - >-
-                        Assess compliance with applicable governance frameworks
-                        and regulatory requirements.
-                      - >-
-                        Evaluate the effectiveness of board structure and
-                        committee arrangements.
-                      - >-
-                        Identify strengths and areas for improvement in
-                        governance practices.
-                      - >-
-                        Provide actionable recommendations for governance
-                        enhancement.
-                  methodology:
-                    overview: >-
-                      A blended approach was used involving structured framework
-                      assessments, desk review of governance documentation, and
-                      analysis of board practices. The evaluation employed
-                      multiple governance frameworks to ensure comprehensive
-                      coverage of governance dimensions. Framework-based
-                      questionnaires were distributed to board members and key
-                      executives, with responses collated and scored against
-                      established criteria.
-                    steps:
-                      - >-
-                        Review of responses to governance framework
-                        questionnaires distributed to all board members.
-                      - >-
-                        Collation and scoring against each applicable framework
-                        section, with particular attention to compliance
-                        indicators.
-                      - >-
-                        Evidence review and supplementary documentation
-                        assessment, including board charters, committee terms of
-                        reference, and governance policies.
-                      - >-
-                        Analysis of board composition, diversity metrics, and
-                        independence assessments.
-                      - >-
-                        Evaluation of board and committee meeting structures and
-                        decision-making processes.
-                      - >-
-                        UPDATED: Comparative analysis against industry best
-                        practices and peer governance benchmarks.
-                    participantSummary: >-
-                      All 12 board members participated in the evaluation
-                      process, representing 100% response rate. Additionally,
-                      the Company Secretary, Chief Risk Officer, and Head of
-                      Internal Audit provided supplementary information and
-                      documentation. The evaluation process was conducted
-                      confidentially to encourage candid responses.
-                    methods:
-                      - Desk Review
-                      - Framework-based Questionnaires
-                      - Document Analysis
-                      - Structured Interviews (limited)
-                    limitations:
-                      - >-
-                        Interview and survey insights were not available for
-                        this cycle, limiting qualitative perspectives on board
-                        dynamics.
-                      - >-
-                        No physical verification of board activities was
-                        undertaken during this evaluation.
-                      - >-
-                        UPDATED: Some historical governance documentation was
-                        not available for the full evaluation period, requiring
-                        reliance on current documentation and board member
-                        recollections.
-                  frameworkResults:
-                    frameworks:
-                      - frameworkId: 01KE6PCKEFA440KGJAS4D4ZBRQ
-                        name: Core Governance Framework
-                        narrative: >-
-                          The board met 17 of 22 key governance criteria under
-                          the Core Governance Framework, representing a
-                          compliance rate of 77.27%. Strong performance was
-                          observed in board structure, role clarity, and board
-                          composition. Areas requiring attention include
-                          documentation of board decisions, formalization of
-                          succession planning processes, and structured board
-                          evaluation mechanisms. The board demonstrates a solid
-                          foundation in governance principles, with identified
-                          gaps presenting opportunities for enhancement rather
-                          than fundamental weaknesses.
-                        sumScore: '17'
-                        totalQuestions: 22
-                        compliancePercent: '77.27'
-                        overallScore: 77.27
-                        keyStrengths:
-                          - Clear separation of Chair and CEO roles
-                          - Established board committee structure
-                          - Active board engagement in strategic matters
-                        keyGaps:
-                          - Formal documentation processes need enhancement
-                          - Succession planning requires more structure
-                          - Board evaluation mechanisms could be more systematic
-                      - frameworkId: 01KE6PG5PVXNY873ZXTGXBQNKW
-                        name: Risk & Audit Framework
-                        narrative: >-
-                          Strong performance was noted in risk management and
-                          audit oversight, with the board meeting 9 of 11
-                          applicable criteria (81.82% compliance). The board has
-                          established risk oversight mechanisms through the
-                          Audit and Risk Committee, with regular risk reporting
-                          and engagement with internal and external auditors.
-                          Risk registers are maintained, and risk appetite
-                          statements are reviewed periodically. The primary
-                          opportunity lies in more structured integration of
-                          risk considerations into strategic decision-making and
-                          enhanced documentation of risk oversight activities.
-                        sumScore: '9'
-                        totalQuestions: 11
-                        compliancePercent: '81.82'
-                        overallScore: 81.82
-                        keyStrengths:
-                          - Effective Audit and Risk Committee operations
-                          - Regular risk reporting to the board
-                          - Strong engagement with auditors
-                        keyGaps:
-                          - >-
-                            Risk integration into strategic planning could be
-                            enhanced
-                          - >-
-                            Documentation of risk oversight decisions needs
-                            improvement
-                      - frameworkId: 01KE6PH8QXYZ123456789ABCDEF
-                        name: Sustainability & ESG Framework
-                        narrative: >-
-                          UPDATED: The board has made significant progress in
-                          ESG governance, meeting 6 of 8 applicable criteria
-                          (75% compliance). Recent initiatives include the
-                          establishment of an ESG committee and the development
-                          of a sustainability strategy. However, formal ESG
-                          reporting and integration into board decision-making
-                          require further development to align with emerging
-                          regulatory expectations.
-                        sumScore: '6'
-                        totalQuestions: 8
-                        compliancePercent: '75.00'
-                        overallScore: 75
-                        keyStrengths:
-                          - Newly established ESG committee
-                          - Sustainability strategy development in progress
-                          - Board awareness of ESG considerations
-                        keyGaps:
-                          - Formal ESG reporting mechanisms not yet established
-                          - ESG integration into board agendas needs enhancement
-                    resultsSummary: >-
-                      Three key frameworks were used for the assessment: Core
-                      Governance, Risk & Audit, and Sustainability & ESG. The
-                      board demonstrated substantial compliance across all
-                      frameworks, with overall scores ranging from 75% to
-                      81.82%. The highest performance was observed in Risk &
-                      Audit (81.82%), followed by Core Governance (77.27%), and
-                      Sustainability & ESG (75%). These results indicate a
-                      governance framework that is well-established with clear
-                      opportunities for incremental enhancement.
-                    heatmapExplanation: >-
-                      The framework results demonstrate a balanced governance
-                      profile with particular strength in risk oversight. Core
-                      governance practices are solid, with identified
-                      opportunities primarily in documentation and formalization
-                      processes. The ESG dimension shows promising development
-                      but requires further maturation to align with best
-                      practices.
-                  surveyInsights:
-                    overview: >-
-                      No direct survey insights were gathered for this
-                      evaluation cycle. The evaluation relied primarily on desk
-                      review and framework-based questionnaires. It is
-                      recommended that future evaluations include a tailored
-                      board survey to capture qualitative perspectives on board
-                      effectiveness, director satisfaction, and areas of
-                      perceived strength and concern.
-                    keyThemes: []
-                    observations: >-
-                      It is recommended that future evaluations include a
-                      tailored board survey to provide additional qualitative
-                      insights into board dynamics, director perspectives on
-                      governance effectiveness, and areas for improvement.
-                      Survey data would complement the framework-based
-                      assessment and provide a more holistic view of board
-                      governance.
-                    notableQuotes: []
-                  interviewInsights:
-                    overview: >-
-                      No formal interviews were conducted as part of this
-                      evaluation. Limited structured discussions were held with
-                      the Company Secretary and Chief Risk Officer to clarify
-                      governance processes and obtain supplementary
-                      documentation. Engaging with board members through
-                      structured interviews would provide valuable qualitative
-                      insights into board dynamics, decision-making processes,
-                      and perceived governance challenges.
-                    themes: []
-                    observations: >-
-                      Engaging with board members through structured interviews
-                      would provide valuable qualitative insights into board
-                      dynamics, decision-making processes, and perceived
-                      governance challenges. Future evaluations should consider
-                      incorporating board member interviews as a standard
-                      component of the evaluation methodology.
-                    boardDynamics: >-
-                      UPDATED: Based on available documentation and interactions
-                      with key officers, the board appears to function
-                      cohesively with effective collaboration between board
-                      members. Board meetings are well-attended, and there is
-                      evidence of robust discussion and debate on key matters.
-                      The Chair facilitates productive board discussions, and
-                      directors actively contribute to strategic
-                      decision-making.
-                  strengths:
-                    narrative: >-
-                      The board has demonstrated several key strengths in its
-                      governance practices. These strengths form a solid
-                      foundation upon which the board can build to further
-                      enhance its governance maturity. The identified strengths
-                      reflect the board's commitment to effective governance and
-                      its proactive approach to governance enhancement.
-                    aspects:
-                      - >-
-                        Strong overall compliance with fundamental governance
-                        principles, with an overall compliance rate of 77.27% on
-                        core governance practices.
-                      - >-
-                        Full engagement in the evaluation process, evidenced by
-                        100% response rate from board members, demonstrating
-                        commitment to governance improvement.
-                      - >-
-                        Effective board and committee meeting cadence, with
-                        regular meetings and comprehensive agenda coverage.
-                      - >-
-                        Clear separation of Chair and CEO roles, ensuring
-                        appropriate checks and balances in leadership structure.
-                      - >-
-                        UPDATED: Robust risk oversight mechanisms through a
-                        well-functioning Audit and Risk Committee, with regular
-                        risk reporting and engagement with auditors.
-                      - >-
-                        UPDATED: Recent improvements in board composition with
-                        the appointment of independent directors, enhancing
-                        board diversity and independence.
-                      - >-
-                        Active board engagement in strategic matters, with
-                        evidence of meaningful board input into strategic
-                        decision-making processes.
-                    items:
-                      - >-
-                        Strong overall compliance with fundamental governance
-                        principles
-                      - >-
-                        Full engagement in the evaluation process (100% response
-                        rate)
-                      - Effective board and committee meeting cadence
-                      - Clear separation of Chair and CEO roles
-                      - Robust risk oversight mechanisms
-                      - Improved board composition with independent directors
-                      - Active board engagement in strategic matters
-                  areasForImprovement:
-                    narrative: >-
-                      Several areas present opportunities for improvement that,
-                      if addressed, would enhance the board's governance
-                      effectiveness and maturity. These areas are not
-                      fundamental weaknesses but rather opportunities for
-                      incremental enhancement. The identified improvements are
-                      manageable and align with the board's overall trajectory
-                      of governance development.
-                    aspects:
-                      - >-
-                        Enhance board documentation processes to ensure
-                        comprehensive record-keeping of board decisions,
-                        discussions, and rationale. This includes formalizing
-                        the documentation of board resolutions and ensuring that
-                        minutes adequately capture the substance of board
-                        discussions.
-                      - >-
-                        Strengthen documentation standards for board decisions,
-                        particularly around strategic decisions and risk-related
-                        matters. Enhanced documentation would improve
-                        auditability and provide better historical records of
-                        board decision-making.
-                      - >-
-                        Broaden ongoing training for board members, with a focus
-                        on emerging governance trends, regulatory developments,
-                        and industry-specific governance challenges. This should
-                        include both formal training sessions and informal
-                        knowledge-sharing opportunities.
-                      - >-
-                        UPDATED: Formalize and document succession planning
-                        processes, including criteria for director succession,
-                        identification of potential candidates, and timelines
-                        for succession planning activities. This builds on
-                        recent progress in this area.
-                      - >-
-                        UPDATED: Enhance ESG governance and reporting mechanisms
-                        to align with emerging regulatory expectations and
-                        stakeholder interests. This should include formal ESG
-                        reporting frameworks and integration of ESG
-                        considerations into board agendas.
-                      - >-
-                        Develop more structured board evaluation mechanisms,
-                        including regular self-assessments and external
-                        evaluations, to provide ongoing feedback on board
-                        effectiveness.
-                    items:
-                      - area: Documentation
-                        issue: >-
-                          Board documentation processes need enhancement to
-                          ensure comprehensive record-keeping of board decisions
-                          and discussions. Current documentation may not always
-                          capture the full substance of board deliberations.
-                        recommendation: >-
-                          Implement standardized documentation templates for
-                          board resolutions and enhance minute-taking practices
-                          to ensure comprehensive capture of board discussions
-                          and rationale. Establish documentation review
-                          processes to ensure quality and completeness.
-                        expectedBenefit: >-
-                          Improved auditability, better historical records,
-                          enhanced accountability, and more comprehensive
-                          documentation for regulatory and compliance purposes.
-                      - area: Succession Planning
-                        issue: >-
-                          UPDATED: Succession planning processes require further
-                          formalization and documentation. While progress has
-                          been made, the processes need to be more structured
-                          and documented to ensure consistency and
-                          effectiveness.
-                        recommendation: >-
-                          Develop a formalized succession planning framework
-                          that includes: (1) criteria for director succession,
-                          (2) identification and development of potential
-                          candidates, (3) timelines for succession activities,
-                          and (4) regular review and update of succession plans.
-                          Document these processes in governance policies.
-                        expectedBenefit: >-
-                          Ensured board continuity, better preparation for
-                          director transitions, improved board composition
-                          planning, and reduced disruption during board member
-                          changes.
-                      - area: Board Training
-                        issue: >-
-                          Ongoing training for board members could be broadened
-                          to cover emerging governance trends, regulatory
-                          developments, and industry-specific challenges.
-                          Training programs should be more structured and
-                          comprehensive.
-                        recommendation: >-
-                          Develop an annual board training calendar covering:
-                          (1) emerging governance trends and best practices, (2)
-                          regulatory developments and compliance requirements,
-                          (3) industry-specific governance challenges, and (4)
-                          director skills development. Include both external
-                          training opportunities and internal knowledge-sharing
-                          sessions.
-                        expectedBenefit: >-
-                          Enhanced director capabilities, better informed
-                          decision-making, improved governance practices, and
-                          alignment with evolving governance standards.
-                      - area: ESG Governance
-                        issue: >-
-                          UPDATED: ESG governance and reporting mechanisms need
-                          enhancement to align with emerging regulatory
-                          expectations. While an ESG committee has been
-                          established, formal reporting frameworks and
-                          integration into board decision-making require
-                          development.
-                        recommendation: >-
-                          Formalize ESG reporting frameworks, integrate ESG
-                          considerations into board agendas and decision-making
-                          processes, and develop metrics for tracking ESG
-                          performance. Establish clear responsibilities for ESG
-                          oversight within the board structure.
-                        expectedBenefit: >-
-                          Improved ESG performance, better stakeholder
-                          communication, enhanced risk management, and alignment
-                          with regulatory expectations.
-                  focusAreasNextYear:
-                    narrative: >-
-                      The following priorities should be addressed in the coming
-                      year to enhance the board's governance effectiveness.
-                      These focus areas align with the identified areas for
-                      improvement and represent manageable, high-impact
-                      initiatives that will contribute to governance maturity.
-                    priorities:
-                      - >-
-                        Conduct annual board and committee effectiveness reviews
-                        to provide ongoing feedback and identify areas for
-                        improvement. This should include both self-assessments
-                        and external evaluations where appropriate.
-                      - >-
-                        Formalise and document risk management protocols,
-                        including risk appetite statements, risk reporting
-                        mechanisms, and integration of risk considerations into
-                        strategic decision-making.
-                      - >-
-                        Implement periodic director training sessions covering
-                        emerging governance trends, regulatory developments, and
-                        director skills development. Training should be tailored
-                        to the board's specific needs and industry context.
-                      - >-
-                        UPDATED: Complete the formalization of succession
-                        planning processes, including documentation of criteria,
-                        candidate identification processes, and succession
-                        timelines.
-                      - >-
-                        UPDATED: Establish formal ESG reporting mechanisms and
-                        integrate ESG considerations into regular board agenda
-                        items and decision-making processes.
-                      - >-
-                        Enhance board documentation standards and processes to
-                        ensure comprehensive capture of board decisions,
-                        discussions, and rationale.
-                    items:
-                      - Conduct annual board and committee effectiveness reviews
-                      - Formalise and document risk management protocols
-                      - Implement periodic director training sessions
-                      - Complete formalization of succession planning processes
-                      - Establish formal ESG reporting mechanisms
-                      - Enhance board documentation standards and processes
-                  recommendationsRoadmap:
-                    narrative: >-
-                      A structured roadmap for implementing the recommendations
-                      outlined in this report is presented below. The roadmap
-                      organizes recommendations by timeline (short-term,
-                      medium-term, long-term) and priority (high, medium, low).
-                      This provides a clear path forward for governance
-                      enhancement and ensures that recommendations are
-                      implemented in a logical and manageable sequence.
-                    timeline:
-                      - period: Q1 2025
-                        actionItems:
-                          - >-
-                            Review and update board charters and key governance
-                            policies to reflect current governance practices and
-                            regulatory requirements.
-                          - >-
-                            Initiate board training on governance, risk, and
-                            compliance, focusing on emerging trends and
-                            regulatory developments.
-                          - >-
-                            UPDATED: Finalize succession planning framework
-                            documentation and obtain board approval for the
-                            formalized process.
-                          - >-
-                            Enhance board documentation templates and train
-                            board support staff on improved documentation
-                            practices.
-                      - period: Q2-Q3 2025
-                        actionItems:
-                          - >-
-                            Launch a comprehensive board survey to gather
-                            qualitative insights on board effectiveness and
-                            governance practices.
-                          - >-
-                            UPDATED: Implement formal ESG reporting mechanisms
-                            and integrate ESG considerations into board agendas.
-                          - >-
-                            Conduct first annual board and committee
-                            effectiveness review, including self-assessments and
-                            external evaluation where appropriate.
-                          - >-
-                            Develop and implement risk management protocol
-                            documentation, including risk appetite statements
-                            and risk reporting frameworks.
-                      - period: Q4 2025
-                        actionItems:
-                          - >-
-                            Review progress on all governance enhancement
-                            initiatives and adjust priorities as needed.
-                          - >-
-                            Conduct follow-up training sessions based on
-                            identified needs from the effectiveness review.
-                          - >-
-                            UPDATED: Complete ESG integration into strategic
-                            planning processes and establish ESG performance
-                            metrics.
-                    responsibility:
-                      - >-
-                        Board Chair and Company Secretary to coordinate
-                        documentation updates and governance policy reviews.
-                      - >-
-                        Nomination and Governance Committee to oversee training
-                        initiatives and succession planning formalization.
-                      - >-
-                        Audit and Risk Committee to lead risk management
-                        protocol development and implementation.
-                      - >-
-                        UPDATED: ESG Committee to drive ESG reporting mechanism
-                        establishment and integration into board processes.
-                      - >-
-                        Company Secretary to coordinate overall governance
-                        enhancement roadmap implementation and progress
-                        tracking.
-                    items:
-                      - recommendation: >-
-                          Review and update board charters and key governance
-                          policies
-                        owner: Board Chair and Company Secretary
-                        timeline: short
-                        priority: high
-                      - recommendation: >-
-                          Initiate board training on governance, risk, and
-                          compliance
-                        owner: Nomination and Governance Committee
-                        timeline: short
-                        priority: high
-                      - recommendation: >-
-                          UPDATED: Finalize succession planning framework
-                          documentation
-                        owner: Nomination and Governance Committee
-                        timeline: short
-                        priority: high
-                      - recommendation: Enhance board documentation templates and training
-                        owner: Company Secretary
-                        timeline: short
-                        priority: medium
-                      - recommendation: Launch comprehensive board survey
-                        owner: Board Chair
-                        timeline: medium
-                        priority: medium
-                      - recommendation: 'UPDATED: Implement formal ESG reporting mechanisms'
-                        owner: ESG Committee
-                        timeline: medium
-                        priority: high
-                      - recommendation: >-
-                          Conduct first annual board and committee effectiveness
-                          review
-                        owner: Board Chair
-                        timeline: medium
-                        priority: medium
-                      - recommendation: >-
-                          Develop and implement risk management protocol
-                          documentation
-                        owner: Audit and Risk Committee
-                        timeline: medium
-                        priority: high
-                      - recommendation: >-
-                          UPDATED: Complete ESG integration into strategic
-                          planning
-                        owner: ESG Committee and Board Chair
-                        timeline: long
-                        priority: medium
-                      - recommendation: >-
-                          Review progress on all governance enhancement
-                          initiatives
-                        owner: Board Chair and Company Secretary
-                        timeline: long
-                        priority: low
-                  appendices:
-                    notes: >-
-                      Additional supporting documentation, including detailed
-                      framework scores, evidence highlights, and supplementary
-                      governance materials, are available upon request. The
-                      board may request additional analysis or clarification on
-                      any aspect of this evaluation.
-                    frameworkScores:
-                      - frameworkId: 01KE6PCKEFA440KGJAS4D4ZBRQ
-                        frameworkName: Core Governance Framework
-                        sumScore: '17'
-                        totalQuestions: 22
-                        compliancePercent: '77.27'
-                      - frameworkId: 01KE6PG5PVXNY873ZXTGXBQNKW
-                        frameworkName: Risk & Audit Framework
-                        sumScore: '9'
-                        totalQuestions: 11
-                        compliancePercent: '81.82'
-                      - frameworkId: 01KE6PH8QXYZ123456789ABCDEF
-                        frameworkName: Sustainability & ESG Framework
-                        sumScore: '6'
-                        totalQuestions: 8
-                        compliancePercent: '75.00'
-                    evidenceHighlights: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-    get:
-      summary: Fetch generated report
-      responses: {}
-      tags:
-        - Evaluations Report
-      security:
-        - BearerAuth: []
-  /api/orgs/{COMPANY_ID}/evaluations/{evaluationId}/report/status:
-    get:
-      summary: Check report generating status
-      responses: {}
-      tags:
-        - Evaluations Report
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-      - name: evaluationId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{evaluationId}}'
-  /api/me/profile:
-    get:
-      summary: get profile
-      responses: {}
-      tags:
-        - Profile
-      security:
-        - BearerAuth: []
-    patch:
-      summary: update profile
-      responses: {}
-      tags:
-        - Profile
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                lastName:
-                  type: string
-                firstName:
-                  type: string
-            example:
-              lastName: Store
-              firstName: Caracolas
-  /api/me/password:
-    patch:
-      summary: change password
-      responses: {}
-      tags:
-        - Profile
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                currentPassword:
-                  type: string
-                newPassword:
-                  type: string
-                confirmNewPassword:
-                  type: string
-            example:
-              currentPassword: John@weq113
-              newPassword: John@weq112
-              confirmNewPassword: John@weq112
-  /api/me/notifications:
-    patch:
-      summary: update notification settings
-      responses: {}
-      tags:
-        - Profile
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                loginNotification:
-                  type: boolean
-                importantNotice:
-                  type: boolean
-                productUpdates:
-                  type: boolean
-                activitySummary:
-                  type: boolean
-            example:
-              loginNotification: false
-              importantNotice: false
-              productUpdates: true
-              activitySummary: false
-  /api/orgs/{COMPANY_ID}/dashboard:
-    get:
-      summary: get dashboard
-      responses: {}
-      tags:
-        - Dashboard
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/announcements/auth:
-    get:
-      summary: Get auth announcements
-      responses: {}
-      tags:
-        - Announcements
-      security:
-        - BearerAuth: []
-  /api/orgs/announcements:
-    get:
-      summary: Admin list all announcements
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-          example: '10'
-        - name: page
-          in: query
-          schema:
-            type: integer
-          example: '1'
-      responses: {}
-      tags:
-        - Announcements
-      security:
-        - BearerAuth: []
-    post:
-      summary: Create auth announcements
-      responses: {}
-      tags:
-        - Announcements
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                body:
-                  type: string
-                targetSurfaces:
-                  type: array
-                  items:
-                    type: string
-                channels:
-                  type: array
-                  items:
-                    type: string
-                endsAt:
-                  type: string
-                  format: date
-            example:
-              title: System Maintenance Scheduled
-              body: >-
-                Scheduled maintenance will occur this weekend. The system will
-                be unavailable on Saturday, 10 PM - 2 AM.
-              targetSurfaces:
-                - auth
-              channels:
-                - web
-              endsAt: '2026-02-19'
-  /api/orgs/{COMPANY_ID}/announcements:
-    get:
-      summary: Get application announcements evaluation page
-      parameters:
-        - name: surface
-          in: query
-          schema:
-            type: string
-          example: evaluations
-      responses: {}
-      tags:
-        - Announcements
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: COMPANY_ID
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{COMPANY_ID}}'
-  /api/orgs/announcements/{announcementId}/toggle:
-    patch:
-      summary: Toggle announcement
-      responses: {}
-      tags:
-        - Announcements
-      security:
-        - BearerAuth: []
-    parameters:
-      - name: announcementId
-        in: path
-        required: true
-        schema:
-          type: string
-        example: '{{announcementId}}'
-  /api/support/submit:
-    post:
-      summary: support without attachment
-      responses: {}
-      tags:
-        - Support
-      security:
-        - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                title:
-                  type: string
-                description:
-                  type: string
-            example:
-              email: caracolasstore@gmail.com
-              title: Issue with app 3
-              description: Testing the support api
-components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
+              $ref: "#/components/schemas/RecordingRequest"
+      responses:
+        "201":
+          description: Recording row
