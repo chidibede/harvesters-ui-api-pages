@@ -39,11 +39,53 @@ components:
   schemas:
     LoginRequest:
       type: object
-      required: [password]
+      required: [email, password]
       properties:
+        email:
+          type: string
+          format: email
         password:
           type: string
-          description: Admin login code (stored as admin.code)
+          minLength: 1
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          description: Min 8 characters
+          minLength: 8
+        firstname: { type: string }
+        lastname: { type: string }
+    CreateAdminRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        email:
+          type: string
+          format: email
+          description: Required when isactive is true (default)
+        password:
+          type: string
+          minLength: 8
+          description: Required when isactive is true; stored as bcrypt hash
+        department: { type: string }
+        team: { type: string }
+        route: { type: string }
+        isactive: { type: boolean }
+        permissions:
+          type: array
+          items: { type: string }
+        role: { type: string }
+        permission_level:
+          type: array
+          items: { type: string }
+        userinfo: { type: string }
+        workerid: { type: string }
     CreateTrainingRequest:
       type: object
       required: [name, start_date, end_date, category, mode]
@@ -83,19 +125,19 @@ components:
       properties:
         worker_ids:
           type: array
-          items: { type: integer }
+          items: { type: string, description: Worker primary key (ULID) }
     RegisterTrainingRequest:
       type: object
       properties:
         worker_id:
-          type: integer
+          type: string
           description: When caller can nominate; omitted for self-registration via linked worker
     ParticipationRequest:
       type: object
       required: [date]
       properties:
-        user_id: { type: integer }
-        worker_id: { type: integer }
+        user_id: { type: string }
+        worker_id: { type: string }
         date: { type: string, format: date }
         session_date: { type: string, format: date }
         status:
@@ -105,9 +147,9 @@ components:
       type: object
       required: [worker_id, department_id, start_date, required_duration_days]
       properties:
-        worker_id: { type: integer }
-        user_id: { type: integer }
-        department_id: { type: integer }
+        worker_id: { type: string }
+        user_id: { type: string }
+        department_id: { type: string }
         start_date: { type: string, format: date }
         required_duration_days: { type: integer, minimum: 1 }
     StreamSessionRequest:
@@ -128,7 +170,7 @@ components:
       properties:
         title: { type: string }
         storage_url: { type: string }
-        stream_session_id: { type: integer }
+        stream_session_id: { type: string }
         duration_seconds: { type: integer }
         downloadable: { type: boolean }
         library_visible: { type: boolean }
@@ -139,6 +181,47 @@ components:
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
         provider_room_id: { type: string }
+    BootstrapSuperAdminRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        code:
+          type: string
+          description: Optional unique admin code; server generates one if omitted
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          minLength: 8
+    VerifyEmailBody:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    ResendVerificationRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
 
 security:
   - bearerAuth: []
@@ -147,7 +230,7 @@ paths:
   /api/hub/auth/signin:
     post:
       tags: [Auth]
-      summary: Sign in (admin code)
+      summary: Sign in (email and password)
       security: []
       requestBody:
         required: true
@@ -159,7 +242,137 @@ paths:
         "200":
           description: accessToken and user payload
         "400":
-          description: Invalid login
+          description: Invalid credentials
+        "403":
+          description: Account pending approval, or email not verified
+
+  /api/hub/auth/register:
+    post:
+      tags: [Auth]
+      summary: Self-service registration (pending approval)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Account created; inactive until an administrator activates it
+        "400":
+          description: Validation error
+        "409":
+          description: Email already registered
+        "503":
+          description: Verification email could not be sent
+
+  /api/hub/auth/bootstrap-super-admin:
+    post:
+      tags: [Auth]
+      summary: Bootstrap first Super Admin (only when none exists)
+      description: |
+        Optional header `X-Bootstrap-Secret` when env `AUTH_BOOTSTRAP_SECRET` is set.
+        After the first super admin exists, returns 409.
+      security: []
+      parameters:
+        - name: X-Bootstrap-Secret
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BootstrapSuperAdminRequest"
+      responses:
+        "201":
+          description: Super admin created
+        "400":
+          description: Validation error
+        "401":
+          description: Invalid bootstrap secret
+        "409":
+          description: Super admin already exists or email/code conflict
+
+  /api/hub/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Generic success (does not confirm email exists)
+
+  /api/hub/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Set new password using reset token from email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password updated
+        "400":
+          description: Invalid token or weak password
+
+  /api/hub/auth/verify-email:
+    get:
+      tags: [Auth]
+      summary: Verify email (link from registration email)
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Email verified
+        "400":
+          description: Invalid or expired token
+    post:
+      tags: [Auth]
+      summary: Verify email (JSON body)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyEmailBody"
+      responses:
+        "200":
+          description: Email verified
+        "400":
+          description: Invalid or expired token
+
+  /api/hub/auth/resend-verification:
+    post:
+      tags: [Auth]
+      summary: Resend email verification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResendVerificationRequest"
+      responses:
+        "200":
+          description: Generic success
 
   /api/hub/audit:
     get:
@@ -307,9 +520,9 @@ paths:
         content:
           application/json:
             schema:
-              type: object
+              $ref: "#/components/schemas/CreateAdminRequest"
       responses:
-        "200":
+        "201":
           description: Created
 
   /api/hub/super/admin/{id}:
@@ -647,7 +860,7 @@ paths:
               $ref: "#/components/schemas/CreateTrainingRequest"
       responses:
         "201":
-          description: training_id, public_id, registration_link
+          description: training_id, registration_link (registration URL uses training id)
 
   /api/hub/trainings/{id}:
     get:
@@ -657,7 +870,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Full detail
@@ -670,7 +883,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
         - name: page
           in: query
           schema: { type: integer }
@@ -690,7 +903,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         content:
           application/json:
@@ -711,7 +924,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -730,7 +943,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -749,11 +962,11 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
         - name: moduleId
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -772,7 +985,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Modules and lessons
@@ -785,7 +998,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Modules and lessons
@@ -799,7 +1012,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -818,7 +1031,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Assignments with progress
@@ -830,7 +1043,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -849,7 +1062,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Trainings list
@@ -862,7 +1075,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Metrics object
@@ -876,11 +1089,11 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
         - name: enrollmentId
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Completion + certificate info
@@ -893,7 +1106,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       responses:
         "200":
           description: Certificate rows
@@ -907,7 +1120,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -926,11 +1139,11 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
         - name: streamSessionId
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         content:
           application/json:
@@ -948,7 +1161,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
         - name: library_only
           in: query
           schema:
@@ -967,7 +1180,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: integer }
+          schema: { type: string }
       requestBody:
         required: true
         content:
