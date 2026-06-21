@@ -8,11 +8,18 @@ info:
 
     ## Authentication — Legacy & Hub (JWT)
 
-    Legacy `/api/*` and Hub `/api/hub/*` use JWT:
+    Legacy `/auth/signin` and Hub `/api/hub/auth/signin`. Hub routes use JWT. Two sign-in modes:
 
-    1. `POST /auth/signin` or `POST /api/hub/auth/signin` with admin login code (`password` field).
-    2. Store `accessToken` from response.
-    3. Send on every request: `Authorization: Bearer {{accessToken}}`
+    **Workers / leaders (email + password)**
+    1. `POST /api/hub/auth/register` → verify email with OTP
+    2. Admin activates account (`isactive`) and links `workerid` if needed
+    3. `POST /api/hub/auth/signin` with `{ "email", "password" }`
+
+    **Legacy admin / kiosk (login code)**
+    1. `POST /auth/signin` or `POST /api/hub/auth/signin` with `{ "password": "<admin code>" }` only
+
+    Store `accessToken` from response. Send on every request:
+    `Authorization: Bearer {{accessToken}}`
 
 
     ## Authentication — Meetings (24h API key)
@@ -204,10 +211,14 @@ info:
 
     ```
     POST /api/meeting/auth/session          → issue/reuse api_key (no auth)
+    GET  /api/meeting/leaders/registrations/summary?meeting_date=2026-07-17
+    GET  /api/meeting/leaders/registrations?meeting_date=2026-07-17&status=confirmed
     GET  /api/meeting/leaders/workers/search?name=First+Last
     PUT  /api/meeting/leaders/workers/{workerId}   → fill missing fields + meeting confirmation
     POST /api/meeting/leaders/workers              → create when not found (PENDING_ADD)
     ```
+
+    **Dashboard:** `summary` returns confirmed/unconfirmed/present totals plus breakdowns by department and team (confirmed only). Unconfirmed = active workers with `is_leader=true` not yet confirmed for the date.
 
     Search requires **≥2 name tokens** (first + surname minimum). Order-independent matching.
     `PUT` only fills empty profile fields; overwriting existing values returns **409**.
@@ -875,8 +886,103 @@ paths:
   /api/hub/auth/signin:
     post:
       tags: ["Flow 1 — Auth & RBAC"]
-      summary: Sign in (admin login code)
+      summary: Sign in (email+password or legacy login code)
       operationId: hubSignIn
+      security: []
+      description: |
+        **Worker/leader:** send `email` + `password` (bcrypt account on `admin` table).
+        **Legacy admin:** send `password` only (matches `admin.code`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [email, password]
+                  properties:
+                    email:
+                      type: string
+                      format: email
+                      example: worker@example.com
+                    password:
+                      type: string
+                      format: password
+                      example: "mySecurePass1"
+                - type: object
+                  required: [password]
+                  properties:
+                    password:
+                      type: string
+                      description: Legacy admin login code
+                      example: "123456"
+            examples:
+              workerEmailLogin:
+                summary: Worker email login
+                value:
+                  email: chidi.enwereji@example.com
+                  password: "mySecurePass1"
+              legacyCodeLogin:
+                summary: Legacy admin code login
+                value:
+                  password: "123456"
+      responses:
+        "200":
+          description: JWT issued
+          content:
+            application/json:
+              example:
+                success: true
+                accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                user:
+                  id: 42
+                  email: chidi.enwereji@example.com
+                  route: null
+                  department: Sound
+                  team: Gbagada Campus
+                  permissions: ["Sound Team"]
+                  role: worker
+                  workerId: 101
+        "400":
+          description: Invalid credentials
+        "403":
+          description: Email not verified or account pending admin approval
+
+  /api/hub/auth/register:
+    post:
+      tags: ["Flow 1 — Auth & RBAC"]
+      summary: Self-register worker Hub account
+      operationId: hubRegister
+      security: []
+      description: Creates inactive `admin` row with role `worker`. Sends 6-digit email OTP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 8 }
+                firstname: { type: string }
+                lastname: { type: string }
+            example:
+              email: chidi.enwereji@example.com
+              password: "mySecurePass1"
+              firstname: Chidi
+              lastname: Enwereji
+      responses:
+        "201":
+          description: Account created — verify email next
+        "409":
+          description: Email already registered
+
+  /api/hub/auth/verify-email:
+    post:
+      tags: ["Flow 1 — Auth & RBAC"]
+      summary: Verify email with 6-digit OTP
+      operationId: hubVerifyEmail
       security: []
       requestBody:
         required: true
@@ -884,27 +990,62 @@ paths:
           application/json:
             schema:
               type: object
-              required: [password]
+              required: [email, otp]
               properties:
-                password:
-                  type: string
-                  description: Admin login code
-                  example: "123456"
+                email: { type: string, format: email }
+                otp: { type: string, example: "123456" }
       responses:
         "200":
-          description: JWT issued
-          content:
-            application/json:
-              example:
-                accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-                user:
-                  id: 42
-                  route: /sound
-                  department: Sound
-                  team: Gbagada Campus
-                  permissions: ["Sound", "Media"]
-                  role: HOD
-                  code: null
+          description: Email verified — await admin activation
+
+  /api/hub/auth/resend-verification:
+    post:
+      tags: ["Flow 1 — Auth & RBAC"]
+      summary: Resend email verification OTP
+      operationId: hubResendVerification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+
+  /api/hub/auth/forgot-password:
+    post:
+      tags: ["Flow 1 — Auth & RBAC"]
+      summary: Request password reset email
+      operationId: hubForgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+
+  /api/hub/auth/reset-password:
+    post:
+      tags: ["Flow 1 — Auth & RBAC"]
+      summary: Reset password with token from email
+      operationId: hubResetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, format: password, minLength: 8 }
 
   /api/hub/rbac/me:
     get:
@@ -2479,6 +2620,102 @@ paths:
                   expires_at: "2026-06-24T12:00:00.000Z"
                   reused: false
 
+  /api/meeting/leaders/registrations/summary:
+    get:
+      tags: ["Flow 9 — Meetings"]
+      summary: Leaders meeting dashboard summary cards
+      operationId: leadersRegistrationsSummary
+      security:
+        - MeetingApiKey: []
+      parameters:
+        - name: meeting_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-07-17"
+      responses:
+        "200":
+          description: Summary totals and breakdowns
+          content:
+            application/json:
+              example:
+                success: true
+                message: Leaders meeting summary
+                data:
+                  meeting_date: "2026-07-17"
+                  total_confirmed: 24
+                  total_unconfirmed: 8
+                  total_present: 0
+                  total_leaders: 32
+                  by_department:
+                    - name: Sound
+                      confirmed: 10
+                    - name: Media
+                      confirmed: 8
+                  by_team:
+                    - name: Gbagada Campus
+                      confirmed: 15
+                    - name: VI Campus
+                      confirmed: 9
+        "400":
+          description: Missing or invalid meeting_date
+
+  /api/meeting/leaders/registrations:
+    get:
+      tags: ["Flow 9 — Meetings"]
+      summary: List leaders meeting registrations for a date
+      operationId: leadersListRegistrations
+      security:
+        - MeetingApiKey: []
+      parameters:
+        - name: meeting_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-07-17"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [confirmed, unconfirmed, all]
+            default: all
+          description: Filter list — unconfirmed uses workers with is_leader=true not yet confirmed
+      responses:
+        "200":
+          description: Summary + worker rows
+          content:
+            application/json:
+              example:
+                success: true
+                meeting_date: "2026-07-17"
+                status: confirmed
+                count: 2
+                summary:
+                  total_confirmed: 24
+                  total_unconfirmed: 8
+                  total_present: 0
+                  total_leaders: 32
+                  by_department:
+                    - name: Sound
+                      confirmed: 10
+                  by_team:
+                    - name: Gbagada Campus
+                      confirmed: 15
+                data:
+                  - id: 101
+                    name: Chidi Bede Enwereji
+                    department: Sound
+                    team: Gbagada Campus
+                    role: Member
+                    is_leader: true
+                    is_confirmed: true
+                    is_present: false
+                    confirmed_at: "2026-07-17T09:30:00.000Z"
+
   /api/meeting/leaders/workers/search:
     get:
       tags: ["Flow 9 — Meetings"]
@@ -2561,14 +2798,24 @@ paths:
               occupation: Engineer
               meeting_date: "2026-06-22"
               is_confirmed: true
+              notes: "Will attend — arriving before 9am"
       responses:
         "200":
           description: Profile and/or meeting registration updated
           content:
             application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: "#/components/schemas/MeetingWorkerUpdateResult"
               example:
                 success: true
-                message: Missing fields updated
+                message: Worker updated
                 data:
                   id: 101
                   name: Chidi Bede Enwereji
@@ -2580,6 +2827,19 @@ paths:
                   updated_fields:
                     - email
                     - phone
+                    - is_confirmed
+                    - notes
+                  meeting_date: "2026-06-22"
+                  is_confirmed: true
+                  is_present: false
+                  notes: "Will attend — arriving before 9am"
+                  confirmed_at: "2026-06-22T08:15:00.000Z"
+                  meeting:
+                    meeting_date: "2026-06-22"
+                    is_confirmed: true
+                    is_present: false
+                    notes: "Will attend — arriving before 9am"
+                    confirmed_at: "2026-06-22T08:15:00.000Z"
         "404":
           description: Worker not found
         "409":
@@ -2963,6 +3223,56 @@ components:
         campus:
           type: string
           example: "Gbagada Campus"
+
+    MeetingRegistrationSnapshot:
+      type: object
+      description: Meeting registration state returned after PUT when meeting_date / confirmation fields are sent.
+      properties:
+        meeting_date:
+          type: string
+          format: date
+          example: "2026-06-22"
+        is_confirmed:
+          type: boolean
+        is_present:
+          type: boolean
+        notes:
+          type: string
+          nullable: true
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    MeetingWorkerUpdateResult:
+      allOf:
+        - $ref: "#/components/schemas/MeetingWorkerResult"
+        - type: object
+          properties:
+            status:
+              type: string
+              nullable: true
+            updated_fields:
+              type: array
+              items:
+                type: string
+            meeting_date:
+              type: string
+              format: date
+              description: Same as meeting.meeting_date — exposed at top level for convenience
+            is_confirmed:
+              type: boolean
+            is_present:
+              type: boolean
+            notes:
+              type: string
+              nullable: true
+            confirmed_at:
+              type: string
+              format: date-time
+              nullable: true
+            meeting:
+              $ref: "#/components/schemas/MeetingRegistrationSnapshot"
 
     MeetingWorkerResult:
       type: object
