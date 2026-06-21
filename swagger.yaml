@@ -1,17 +1,24 @@
 openapi: 3.0.3
 info:
-  title: Harvesters Workers Hub & Meetings API
+  title: Harvesters Workforce API
   description: |
-    **Workers Hub** (`/api/hub/...`) and **Meetings** (`/api/meeting/...`) on one API Gateway.
-    Import into Postman: **Import → File → hub-api.openapi.yaml**.
+    **Unified spec** for Legacy church attendance (`/api/*`), Workers Hub (`/api/hub/*`), and Meetings (`/api/meeting/*`) on one API Gateway.
+    Import into Postman: **Import → File → harvesters-api.openapi.yaml** (unified: legacy + hub + meetings).
+    Source for Hub/Meetings paths: edit this file, then run `npm run docs:bundle`.
 
-    ## Authentication (Hub)
+    ## Authentication — Legacy & Hub (JWT)
 
-    Hub routes use JWT:
+    Legacy `/api/*` and Hub `/api/hub/*` use JWT:
 
-    1. `POST /api/hub/auth/signin` with admin login code (password field).
+    1. `POST /auth/signin` or `POST /api/hub/auth/signin` with admin login code (`password` field).
     2. Store `accessToken` from response.
     3. Send on every request: `Authorization: Bearer {{accessToken}}`
+
+
+    ## Authentication — Meetings (24h API key)
+
+    1. `POST /api/meeting/auth/session` with stable `client_id` (UUID in localStorage) — no auth header.
+    2. Store `api_key`; send `x-api-key: {{meetingApiKey}}` on all other meeting routes.
 
     Optional for write endpoints that support replay protection:
     `Idempotency-Key: {{$guid}}`
@@ -191,19 +198,28 @@ info:
 
     ---
 
-    ## Flow 9 — Meetings (leaders meeting)
+    ## Flow 9 — Meetings kiosk (leaders meeting)
 
     Uses **24h meeting API keys**, not JWT. Same API Gateway base URL.
 
     ```
     POST /api/meeting/auth/session          → issue/reuse api_key (no auth)
     GET  /api/meeting/leaders/workers/search?name=First+Last
-    PUT  /api/meeting/leaders/workers/{workerId}   → fill missing fields only
-    POST /api/meeting/leaders/workers              → create when not found
+    PUT  /api/meeting/leaders/workers/{workerId}   → fill missing fields + meeting confirmation
+    POST /api/meeting/leaders/workers              → create when not found (PENDING_ADD)
     ```
 
     Search requires **≥2 name tokens** (first + surname minimum). Order-independent matching.
-    `PUT` only fills empty fields; overwriting existing values returns **409**.
+    `PUT` only fills empty profile fields; overwriting existing values returns **409**.
+
+    **Meeting confirmation** (stored in `meeting_registration`):
+
+    ```json
+    { "meeting_date": "2026-06-22", "is_confirmed": true }
+    ```
+
+    `meeting_date` is required when sending `is_confirmed`, `is_present`, or `notes`.
+    New workers via `POST` are created with **`status: PENDING_ADD`** (admin approval).
 
     ---
 
@@ -227,6 +243,9 @@ servers:
     description: Local SST dev (replace with your stage URL)
 
 tags:
+  - name: "Legacy — Auth"
+  - name: "Legacy — Workers & Sunday Attendance"
+  - name: "Legacy — Departments & Reports"
   - name: "Flow 1 — Auth & RBAC"
   - name: "Flow 2 — Directory & Attendance"
   - name: "Flow 3 — Trainings"
@@ -241,6 +260,615 @@ security:
   - BearerAuth: []
 
 paths:
+  # ─────────────────────────────────────────────────────────────────────────
+  # LEGACY — CHURCH ATTENDANCE (/api/*) — JWT (same login as Hub)
+  # Mirror routes also exist under /api/hub/* for the Workers Hub app.
+  # ─────────────────────────────────────────────────────────────────────────
+  /auth/signin:
+    post:
+      tags: ["Legacy — Auth"]
+      summary: Sign in (legacy app — admin login code)
+      operationId: legacySignIn
+      security: []
+      description: |
+        Same handler as `POST /api/hub/auth/signin`. Returns a JWT used as
+        `Authorization: Bearer {{accessToken}}` on all `/api/*` routes below.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  description: Admin login code (not email/password account login)
+                  example: "123456"
+            example:
+              password: "123456"
+      responses:
+        "200":
+          description: JWT issued
+          content:
+            application/json:
+              example:
+                success: true
+                message: Sign in successful
+                data:
+                  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  user:
+                    id: 1
+                    email: admin@harvesters.example
+                    role: admin
+                    department: All
+                    permissions: ["Sound Team", "Media"]
+        "401":
+          description: Invalid login code
+          content:
+            application/json:
+              example:
+                success: false
+                message: Invalid credentials
+
+  /api/workers:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Fetch worker roster for a Sunday
+      operationId: legacyFetchWorkers
+      description: |
+        Returns workers for one or more departments with their attendance state for `activeDate`.
+        Use `permissions` (comma-separated or JSON array string) when the user spans multiple departments.
+        Admin + `team` uses a different code path (team-level roster).
+      parameters:
+        - $ref: "#/components/parameters/activeDate"
+        - name: department
+          in: query
+          schema: { type: string }
+          description: Single department filter (or use `permissions` for multiple)
+          example: "Sound Team"
+        - name: permissions
+          in: query
+          schema: { type: string }
+          description: Comma-separated departments or JSON array string, e.g. `["Sound Team","Media"]`
+        - name: isAdmin
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+          description: When `"true"` with `team`, fetches admin team roster
+        - name: team
+          in: query
+          schema: { type: string }
+          description: Team/campus filter (used with `isAdmin=true`)
+          example: "Gbagada Campus"
+        - name: activeGroup
+          in: query
+          schema: { type: string, default: All }
+          description: Department group filter for admin view (`All` or a specific department)
+      responses:
+        "200":
+          description: Worker roster with attendance state for the Sunday
+          content:
+            application/json:
+              example:
+                success: true
+                message: Workers fetched successfully
+                data:
+                  - id: 101
+                    name: Chidi Bede Enwereji
+                    fullname: Chidi Bede Enwereji
+                    firstname: Chidi
+                    lastname: Enwereji
+                    othername: Bede
+                    email: chidi.enwereji@example.com
+                    phonenumber: "+2348012345678"
+                    department: "Sound Team"
+                    team: "Gbagada Campus"
+                    workerrole: Member
+                    status: ACTIVE
+                    attendance: Present
+                    attendancedate: "Sunday - 21/6/2026"
+        "400":
+          description: Missing activeDate or department/permissions
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/workers/lookup:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Lookup worker by phone number
+      operationId: legacyLookupWorkerByPhone
+      parameters:
+        - name: phone
+          in: query
+          required: true
+          schema: { type: string }
+          description: Phone number as stored on the worker record
+          example: "+2348012345678"
+      responses:
+        "200":
+          description: Worker found or empty result
+          content:
+            application/json:
+              example:
+                success: true
+                message: Worker found
+                data:
+                  id: 101
+                  name: Chidi Bede Enwereji
+                  phonenumber: "+2348012345678"
+                  department: "Sound Team"
+        "400":
+          description: Missing phone query param
+
+  /api/unmarked/workers:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Workers not yet marked for activeDate
+      operationId: legacyFetchUnmarkedWorkers
+      parameters:
+        - $ref: "#/components/parameters/activeDate"
+        - name: department
+          in: query
+          required: true
+          schema: { type: string }
+          example: "Sound Team"
+        - name: team
+          in: query
+          schema: { type: string }
+          example: "Gbagada Campus"
+      responses:
+        "200":
+          description: Workers with no attendance row for this Sunday
+          content:
+            application/json:
+              example:
+                success: true
+                message: Unmarked workers fetched
+                data:
+                  - id: 205
+                    name: Jane Doe
+                    department: "Sound Team"
+        "400":
+          description: Missing activeDate or department
+
+  /api/workers/add:
+    post:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Submit new worker (PENDING_ADD)
+      operationId: legacyAddWorker
+      description: |
+        Creates a worker with `status: PENDING_ADD` pending admin approval.
+        Accepts `phone` or `phonenumber`, `role` or `workerrole`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegacyWorkerInput"
+            example:
+              firstname: Chidi
+              lastname: Enwereji
+              othername: Bede
+              email: chidi.enwereji@example.com
+              phone: "+2348012345678"
+              role: Member
+              department: "Sound Team"
+              team: "Gbagada Campus"
+              birthdate: "1990-05-15"
+              gender: Male
+      responses:
+        "200":
+          description: Worker submitted for approval
+          content:
+            application/json:
+              example:
+                success: true
+                message: Worker added successfully
+                data:
+                  id: 1024
+                  status: PENDING_ADD
+        "400":
+          description: Validation error (missing firstname/lastname)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/workers/requestDelete:
+    put:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Request worker removal (PENDING_DELETE)
+      operationId: legacyRequestDeleteWorker
+      description: |
+        Marks a worker for removal pending admin approval. Sets `status: PENDING_DELETE`
+        and stores delete metadata on the worker row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegacyWorkerDeleteRequest"
+            example:
+              workerid: 101
+              deleteData:
+                reasonfordelete: Relocated out of church
+                nameofrequester: Jane Doe
+                roleofrequester: HOD
+      responses:
+        "200":
+          description: Delete request submitted
+          content:
+            application/json:
+              example:
+                success: true
+                message: Workers removal initiated successfully
+                data:
+                  id: 101
+                  status: PENDING_DELETE
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          description: Worker not found or update failed
+
+  /api/uniquedates:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: List available Sunday dates for attendance
+      operationId: legacyGetUniqueDates
+      description: Returns distinct `attendancedate` values already used in the system.
+      responses:
+        "200":
+          description: Array of date strings (`Sunday - D/M/YYYY`)
+          content:
+            application/json:
+              example:
+                success: true
+                message: Unique dates fetched
+                data:
+                  - "Sunday - 21/6/2026"
+                  - "Sunday - 14/6/2026"
+
+  /api/attendance:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Department attendance summary
+      operationId: legacyFetchAttendance
+      parameters:
+        - $ref: "#/components/parameters/activeDate"
+        - name: department
+          in: query
+          schema: { type: string }
+          description: Filter summary to one department
+        - name: permissions
+          in: query
+          schema: { type: string }
+          description: Comma-separated or JSON array of departments the user can view
+      responses:
+        "200":
+          description: Per-department present/absent counts for the Sunday
+          content:
+            application/json:
+              example:
+                success: true
+                message: Attendance fetched
+                data:
+                  - department: "Sound Team"
+                    present: 12
+                    absent: 3
+                    notRecorded: 1
+        "400":
+          description: Missing activeDate
+
+  /api/attendance/admin:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Admin team attendance overview
+      operationId: legacyFetchAdminAttendance
+      parameters:
+        - $ref: "#/components/parameters/activeDate"
+        - name: team
+          in: query
+          schema: { type: string }
+          example: "Gbagada Campus"
+        - name: permissions
+          in: query
+          schema: { type: string }
+        - name: activeGroup
+          in: query
+          schema: { type: string, default: All }
+      responses:
+        "200":
+          description: Admin roster with attendance for team/departments
+          content:
+            application/json:
+              example:
+                success: true
+                message: Admin attendance fetched
+                data:
+                  - id: 101
+                    name: Chidi Bede Enwereji
+                    department: "Sound Team"
+                    attendance: Present
+
+  /api/attendance/add:
+    post:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Mark Sunday attendance (batch)
+      operationId: legacyAddAttendance
+      description: |
+        Batch mark attendance for one or more workers. If `attendance` is omitted on a row,
+        defaults to `"Not recorded"`. Caller must have permission for each `department` in the payload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttendanceAddRequest"
+            example:
+              attendance:
+                - workerid: 101
+                  name: Chidi Bede Enwereji
+                  department: "Sound Team"
+                  attendancedate: "Sunday - 21/6/2026"
+                  attendance: Present
+                - workerid: 102
+                  name: Jane Doe
+                  department: "Sound Team"
+                  attendancedate: "Sunday - 21/6/2026"
+                  attendance: Absent
+      responses:
+        "200":
+          description: Marks saved
+          content:
+            application/json:
+              example:
+                success: true
+                message: Attendance added successfully
+        "400":
+          description: Empty or invalid attendance array
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/attendance/history:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Attendance history for department
+      operationId: legacyAttendanceHistory
+      parameters:
+        - name: department
+          in: query
+          schema: { type: string }
+          example: "Sound Team"
+      responses:
+        "200":
+          description: Historical attendance rows
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  - workerid: 101
+                    name: Chidi Bede Enwereji
+                    attendancedate: "Sunday - 21/6/2026"
+                    attendance: Present
+
+  /api/attendance/trends:
+    get:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Top present / absent workers
+      operationId: legacyAttendanceTrends
+      parameters:
+        - name: department
+          in: query
+          schema: { type: string }
+          example: "Sound Team"
+      responses:
+        "200":
+          description: Trend stats for department
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  mostPresent:
+                    - name: Chidi Bede Enwereji
+                      count: 8
+                  mostAbsent:
+                    - name: Jane Doe
+                      count: 3
+
+  /api/attendance/close:
+    put:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Close attendance for a date (admin)
+      operationId: legacyCloseAttendance
+      description: Switches off attendance marking globally (admin action).
+      responses:
+        "200":
+          description: Attendance closed
+          content:
+            application/json:
+              example:
+                success: true
+                message: Attendance switched off successfully
+
+  /api/attendance/enable:
+    put:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Enable attendance marking
+      operationId: legacyEnableAttendance
+      responses:
+        "200":
+          description: Attendance enabled
+          content:
+            application/json:
+              example:
+                success: true
+                message: Attendance enabled successfully
+
+  /api/attendance/disable:
+    put:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Disable attendance marking
+      operationId: legacyDisableAttendance
+      responses:
+        "200":
+          description: Attendance disabled
+          content:
+            application/json:
+              example:
+                success: true
+                message: Attendance disabled successfully
+
+  /api/attendance/not-recorded:
+    delete:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Delete not-recorded attendance rows
+      operationId: legacyDeleteNotRecorded
+      description: Admin-only. Removes all rows where attendance = `"Not recorded"`.
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              example:
+                success: true
+                message: Not recorded attendance deleted successfully
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/attendance/record:
+    delete:
+      tags: ["Legacy — Workers & Sunday Attendance"]
+      summary: Delete a specific attendance record
+      operationId: legacyDeleteAttendanceRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerid]
+              properties:
+                workerid:
+                  type: integer
+                  example: 101
+                attendancedate:
+                  type: string
+                  description: Defaults to next Sunday if omitted
+                  example: "Sunday - 21/6/2026"
+            example:
+              workerid: 101
+              attendancedate: "Sunday - 21/6/2026"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              example:
+                success: true
+                message: Attendance record deleted successfully
+        "404":
+          description: Record not found
+        "400":
+          description: Invalid workerid
+
+  /api/departments:
+    get:
+      tags: ["Legacy — Departments & Reports"]
+      summary: List departments
+      operationId: legacyListDepartments
+      responses:
+        "200":
+          description: Department list
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  - id: 1
+                    name: "Sound Team"
+                  - id: 2
+                    name: Media
+
+  /api/workers/generate/report:
+    post:
+      tags: ["Legacy — Departments & Reports"]
+      summary: Generate attendance report (email)
+      operationId: legacyGenerateReport
+      description: Triggers weekly worker report email. No request body required.
+      responses:
+        "200":
+          description: Report queued/sent
+          content:
+            application/json:
+              example:
+                success: true
+                message: Worker report generated successfully
+
+  /api/audit:
+    get:
+      tags: ["Legacy — Departments & Reports"]
+      summary: Fetch audit log
+      operationId: legacyFetchAudit
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: Paginated audit entries
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  - id: 9001
+                    event: attendance_marked
+                    userCode: admin@harvesters.example
+                    createdAt: "2026-06-21T10:30:00.000Z"
+                    metadata:
+                      attendancedate: "Sunday - 21/6/2026"
+                      departments: ["Sound Team"]
+
+  /api/leadership-registrations:
+    post:
+      tags: ["Legacy — Departments & Reports"]
+      summary: Public leadership course registration
+      operationId: legacySubmitLeadershipRegistration
+      security: []
+      description: |
+        Public endpoint (no JWT). Submits a leadership training registration form.
+        `leadershipRole` is optional unless `leadershipStatus` is `"New Leader"`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadershipRegistrationInput"
+            example:
+              fullName: Chidi Bede Enwereji
+              email: chidi.enwereji@example.com
+              phoneNumber: "+2348012345678"
+              sex: Male
+              leadershipStatus: Worker
+              leadershipRole: HOD
+              campus: "Gbagada Campus"
+              course: "Leadership Foundations"
+      responses:
+        "201":
+          description: Registration submitted
+          content:
+            application/json:
+              example:
+                success: true
+                message: Registration successful
+        "400":
+          description: Missing required field
+
   # ─────────────────────────────────────────────────────────────────────────
   # FLOW 1 — AUTH & RBAC
   # ─────────────────────────────────────────────────────────────────────────
@@ -1903,7 +2531,7 @@ paths:
   /api/meeting/leaders/workers/{workerId}:
     put:
       tags: ["Flow 9 — Meetings"]
-      summary: Update missing profile fields only
+      summary: Update missing profile fields and/or meeting registration
       operationId: leadersUpdateWorker
       security:
         - MeetingApiKey: []
@@ -1921,9 +2549,11 @@ paths:
               role: Member
               birthdate: "1990-05-15"
               gender: Male
+              meeting_date: "2026-06-22"
+              is_confirmed: true
       responses:
         "200":
-          description: Fields updated
+          description: Profile and/or meeting registration updated
           content:
             application/json:
               example:
@@ -1978,18 +2608,20 @@ paths:
               gender: Male
       responses:
         "201":
-          description: Worker created (ACTIVE)
+          description: Worker submitted for approval (PENDING_ADD)
           content:
             application/json:
               example:
                 success: true
-                message: Worker created
+                message: Worker submitted for approval (PENDING_ADD)
                 data:
                   id: 1024
                   name: Chidi Bede Enwereji
                   department: Sound
                   team: Gbagada Campus
                   role: Member
+                  status: PENDING_ADD
+                  pending_approval: true
                   isMissing: []
                   created: true
         "400":
@@ -2078,6 +2710,85 @@ components:
       example: 101
 
   schemas:
+    ApiSuccessEnvelope:
+      type: object
+      description: Standard JSON response wrapper used across most endpoints.
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string, example: Operation completed }
+        data: { description: Payload — shape varies by endpoint }
+        count: { type: integer, description: Optional count for list/search responses }
+
+    WorkerStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE, PENDING_ADD, PENDING_DELETE]
+      description: Worker approval lifecycle status.
+
+    LegacyWorkerInput:
+      type: object
+      required: [firstname, lastname]
+      description: |
+        Submit a new worker for admin approval. Creates row with `status: PENDING_ADD`.
+        Accepts `phone` or `phonenumber`, `role` or `workerrole`.
+      properties:
+        firstname: { type: string, example: Chidi }
+        lastname: { type: string, example: Enwereji }
+        othername: { type: string, example: Bede }
+        email: { type: string, format: email, example: chidi.enwereji@example.com }
+        phone: { type: string, description: Alias for phonenumber, example: "+2348012345678" }
+        phonenumber: { type: string, example: "+2348012345678" }
+        role: { type: string, description: Alias for workerrole, example: Member }
+        workerrole: { type: string, example: Member }
+        department: { type: string, example: Sound }
+        team: { type: string, example: "Gbagada Campus" }
+        birthdate: { type: string, example: "1990-05-15" }
+        gender: { type: string, example: Male }
+        maritalstatus: { type: string, example: Single }
+        agerange: { type: string, example: "26-35" }
+        address: { type: string }
+        employment: { type: string }
+        occupation: { type: string, example: Engineer }
+        campus: { type: string, example: "Gbagada Campus" }
+
+    LegacyWorkerDeleteRequest:
+      type: object
+      required: [workerid, deleteData]
+      properties:
+        workerid:
+          type: integer
+          description: Worker id to request removal for
+          example: 101
+        deleteData:
+          type: object
+          required: [reasonfordelete, nameofrequester, roleofrequester]
+          properties:
+            reasonfordelete: { type: string, example: Relocated out of church }
+            nameofrequester: { type: string, example: Jane Doe }
+            roleofrequester: { type: string, example: HOD }
+
+    LeadershipRegistrationInput:
+      type: object
+      required: [fullName, email, phoneNumber, sex, leadershipStatus, campus, course]
+      properties:
+        fullName: { type: string, example: Chidi Bede Enwereji }
+        email: { type: string, format: email }
+        phoneNumber: { type: string, example: "+2348012345678" }
+        sex: { type: string, example: Male }
+        leadershipStatus: { type: string, example: Worker }
+        leadershipRole: { type: string, nullable: true, example: HOD }
+        campus: { type: string, example: "Gbagada Campus" }
+        course: { type: string, example: "Leadership Foundations" }
+
+    AttendanceAddRequest:
+      type: object
+      required: [attendance]
+      properties:
+        attendance:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/AttendanceRecord"
+
     CreateTrainingInput:
       type: object
       required: [name, start_date, end_date, category, mode]
@@ -2096,14 +2807,20 @@ components:
 
     AttendanceRecord:
       type: object
+      required: [workerid, department]
+      description: One row in a batch attendance POST. `attendance` defaults to `"Not recorded"` if omitted.
       properties:
-        workerid: { type: integer }
-        name: { type: string }
-        department: { type: string }
-        attendancedate: { type: string, example: "Sunday - 21/6/2026" }
+        workerid: { type: integer, example: 101 }
+        name: { type: string, example: Chidi Bede Enwereji }
+        department: { type: string, example: "Sound Team" }
+        attendancedate:
+          type: string
+          example: "Sunday - 21/6/2026"
+          description: "Format: `Sunday - D/M/YYYY`"
         attendance:
           type: string
           enum: [Present, Absent, "Not recorded", Excused]
+          default: "Not recorded"
 
     MeetingSessionRequest:
       type: object
@@ -2121,7 +2838,9 @@ components:
 
     MeetingWorkerPatch:
       type: object
-      description: Only include fields to fill — must currently be empty on the worker
+      description: |
+        Profile fields — only fill empty worker columns.
+        Meeting fields — upsert `meeting_registration` for this worker/date.
       properties:
         email:
           type: string
@@ -2145,10 +2864,35 @@ components:
         gender:
           type: string
           example: Male
+        maritalstatus:
+          type: string
+        agerange:
+          type: string
+        address:
+          type: string
+        employment:
+          type: string
+        occupation:
+          type: string
+        meeting_date:
+          type: string
+          format: date
+          description: Required when confirming meeting attendance
+          example: "2026-06-22"
+        is_confirmed:
+          type: boolean
+          description: Worker confirms they will attend this meeting date
+        is_present:
+          type: boolean
+          description: Mark present on the meeting day (optional)
+        notes:
+          type: string
+          nullable: true
 
     MeetingWorkerCreate:
       type: object
       required: [firstname, lastname]
+      description: Creates worker with status PENDING_ADD (admin approval required).
       properties:
         firstname:
           type: string
@@ -2163,7 +2907,13 @@ components:
           type: string
         phone:
           type: string
+          description: Alias for phonenumber
+        phonenumber:
+          type: string
         role:
+          type: string
+          description: Alias for workerrole
+        workerrole:
           type: string
         department:
           type: string
@@ -2172,6 +2922,18 @@ components:
         birthdate:
           type: string
         gender:
+          type: string
+        maritalstatus:
+          type: string
+        agerange:
+          type: string
+        address:
+          type: string
+        employment:
+          type: string
+        occupation:
+          type: string
+        campus:
           type: string
 
     MeetingWorkerResult:
