@@ -192,7 +192,13 @@ info:
     GET/POST/PUT/DELETE  /api/hub/super/admin/admins
     PUT  /api/hub/super/admin/{id}/role
     PUT  /api/hub/super/admin/{id}/permissions
+    GET  /api/hub/super/admin/meeting/leaders/registrations/summary?meeting_date=YYYY-MM-DD
+    GET  /api/hub/super/admin/meeting/leaders/registrations?meeting_date=YYYY-MM-DD
     ```
+
+    Legacy mirror (same handlers, same super-admin JWT): `/api/super/admin/meeting/leaders/registrations*`
+
+    Leaders meeting registration audit dashboard — **super-admin only** (`Authorization: Bearer` from `/auth/signin` or `/api/hub/auth/signin`). Not available on meeting kiosk API key.
 
     ---
 
@@ -211,14 +217,12 @@ info:
 
     ```
     POST /api/meeting/auth/session          → issue/reuse api_key (no auth)
-    GET  /api/meeting/leaders/registrations/summary?meeting_date=2026-07-17
-    GET  /api/meeting/leaders/registrations?meeting_date=2026-07-17&status=confirmed
     GET  /api/meeting/leaders/workers/search?name=First+Last
     PUT  /api/meeting/leaders/workers/{workerId}   → fill missing fields + meeting confirmation
     POST /api/meeting/leaders/workers              → create when not found (PENDING_ADD)
     ```
 
-    **Dashboard:** `summary` returns confirmed/unconfirmed/present totals plus breakdowns by department and team (confirmed only). Unconfirmed = active workers with `is_leader=true` not yet confirmed for the date.
+    Registration audit dashboard (summary + list) is **super-admin JWT only** — see Flow 7, not meeting API key.
 
     Search requires **≥2 name tokens** (first + surname minimum). Order-independent matching.
     `PUT` only fills empty profile fields; overwriting existing values returns **409**.
@@ -844,6 +848,64 @@ paths:
                     metadata:
                       attendancedate: "Sunday - 21/6/2026"
                       departments: ["Sound Team"]
+
+  /api/super/admin/meeting/leaders/registrations/summary:
+    get:
+      tags: ["Legacy — Departments & Reports"]
+      summary: Leaders meeting dashboard summary cards (audit)
+      operationId: legacySuperAdminLeadersRegistrationsSummary
+      description: |
+        Super-admin JWT only (`POST /auth/signin` with login code). Same handler as
+        `GET /api/hub/super/admin/meeting/leaders/registrations/summary`. Not available on meeting `x-api-key`.
+      parameters:
+        - name: meeting_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-07-17"
+      responses:
+        "200":
+          description: Summary totals and breakdowns
+        "400":
+          description: Missing or invalid meeting_date
+        "401":
+          description: Missing or invalid JWT
+        "403":
+          description: Requires super-admin role
+
+  /api/super/admin/meeting/leaders/registrations:
+    get:
+      tags: ["Legacy — Departments & Reports"]
+      summary: List leaders meeting registrations for a date (audit)
+      operationId: legacySuperAdminLeadersListRegistrations
+      description: |
+        Super-admin JWT only. Same handler as
+        `GET /api/hub/super/admin/meeting/leaders/registrations`. Filter with `status=confirmed|unconfirmed|all`.
+      parameters:
+        - name: meeting_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-07-17"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [confirmed, unconfirmed, all]
+            default: all
+      responses:
+        "200":
+          description: Summary + worker rows
+        "400":
+          description: Missing or invalid meeting_date
+        "401":
+          description: Missing or invalid JWT
+        "403":
+          description: Requires super-admin role
 
   /api/leadership-registrations:
     post:
@@ -2493,6 +2555,114 @@ paths:
         "200":
           description: Permissions assigned
 
+  /api/hub/super/admin/meeting/leaders/registrations/summary:
+    get:
+      tags: ["Flow 7 — Super Admin"]
+      summary: Leaders meeting dashboard summary cards (audit)
+      description: |
+        Super-admin JWT only (`POST /auth/signin` or `POST /api/hub/auth/signin` with login code).
+        Does **not** accept meeting `x-api-key`. All access is audit-logged.
+      operationId: superAdminLeadersRegistrationsSummary
+      parameters:
+        - name: meeting_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-07-17"
+      responses:
+        "200":
+          description: Summary totals and breakdowns
+          content:
+            application/json:
+              example:
+                success: true
+                message: Leaders meeting summary
+                data:
+                  meeting_date: "2026-07-17"
+                  total_confirmed: 24
+                  total_unconfirmed: 8
+                  total_present: 0
+                  total_leaders: 32
+                  by_department:
+                    - name: Sound
+                      confirmed: 10
+                    - name: Media
+                      confirmed: 8
+                  by_team:
+                    - name: Gbagada Campus
+                      confirmed: 15
+                    - name: VI Campus
+                      confirmed: 9
+        "400":
+          description: Missing or invalid meeting_date
+        "401":
+          description: Missing or invalid JWT
+        "403":
+          description: Requires super-admin role
+
+  /api/hub/super/admin/meeting/leaders/registrations:
+    get:
+      tags: ["Flow 7 — Super Admin"]
+      summary: List leaders meeting registrations for a date (audit)
+      description: |
+        Super-admin JWT only. Does **not** accept meeting `x-api-key`.
+        Filter with `status=confirmed|unconfirmed|all`. Access is audit-logged.
+      operationId: superAdminLeadersListRegistrations
+      parameters:
+        - name: meeting_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-07-17"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [confirmed, unconfirmed, all]
+            default: all
+          description: Filter list — unconfirmed uses workers with is_leader=true not yet confirmed
+      responses:
+        "200":
+          description: Summary + worker rows
+          content:
+            application/json:
+              example:
+                success: true
+                meeting_date: "2026-07-17"
+                status: confirmed
+                count: 2
+                summary:
+                  total_confirmed: 24
+                  total_unconfirmed: 8
+                  total_present: 0
+                  total_leaders: 32
+                  by_department:
+                    - name: Sound
+                      confirmed: 10
+                  by_team:
+                    - name: Gbagada Campus
+                      confirmed: 15
+                data:
+                  - id: 101
+                    name: Chidi Bede Enwereji
+                    department: Sound
+                    team: Gbagada Campus
+                    role: Member
+                    is_leader: true
+                    is_confirmed: true
+                    is_present: false
+                    confirmed_at: "2026-07-17T09:30:00.000Z"
+        "400":
+          description: Missing or invalid meeting_date
+        "401":
+          description: Missing or invalid JWT
+        "403":
+          description: Requires super-admin role
+
   # ─────────────────────────────────────────────────────────────────────────
   # FLOW 8 — DEPARTMENTS & AUDIT
   # ─────────────────────────────────────────────────────────────────────────
@@ -2619,102 +2789,6 @@ paths:
                   meeting_type: leaders
                   expires_at: "2026-06-24T12:00:00.000Z"
                   reused: false
-
-  /api/meeting/leaders/registrations/summary:
-    get:
-      tags: ["Flow 9 — Meetings"]
-      summary: Leaders meeting dashboard summary cards
-      operationId: leadersRegistrationsSummary
-      security:
-        - MeetingApiKey: []
-      parameters:
-        - name: meeting_date
-          in: query
-          required: true
-          schema:
-            type: string
-            format: date
-          example: "2026-07-17"
-      responses:
-        "200":
-          description: Summary totals and breakdowns
-          content:
-            application/json:
-              example:
-                success: true
-                message: Leaders meeting summary
-                data:
-                  meeting_date: "2026-07-17"
-                  total_confirmed: 24
-                  total_unconfirmed: 8
-                  total_present: 0
-                  total_leaders: 32
-                  by_department:
-                    - name: Sound
-                      confirmed: 10
-                    - name: Media
-                      confirmed: 8
-                  by_team:
-                    - name: Gbagada Campus
-                      confirmed: 15
-                    - name: VI Campus
-                      confirmed: 9
-        "400":
-          description: Missing or invalid meeting_date
-
-  /api/meeting/leaders/registrations:
-    get:
-      tags: ["Flow 9 — Meetings"]
-      summary: List leaders meeting registrations for a date
-      operationId: leadersListRegistrations
-      security:
-        - MeetingApiKey: []
-      parameters:
-        - name: meeting_date
-          in: query
-          required: true
-          schema:
-            type: string
-            format: date
-          example: "2026-07-17"
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [confirmed, unconfirmed, all]
-            default: all
-          description: Filter list — unconfirmed uses workers with is_leader=true not yet confirmed
-      responses:
-        "200":
-          description: Summary + worker rows
-          content:
-            application/json:
-              example:
-                success: true
-                meeting_date: "2026-07-17"
-                status: confirmed
-                count: 2
-                summary:
-                  total_confirmed: 24
-                  total_unconfirmed: 8
-                  total_present: 0
-                  total_leaders: 32
-                  by_department:
-                    - name: Sound
-                      confirmed: 10
-                  by_team:
-                    - name: Gbagada Campus
-                      confirmed: 15
-                data:
-                  - id: 101
-                    name: Chidi Bede Enwereji
-                    department: Sound
-                    team: Gbagada Campus
-                    role: Member
-                    is_leader: true
-                    is_confirmed: true
-                    is_present: false
-                    confirmed_at: "2026-07-17T09:30:00.000Z"
 
   /api/meeting/leaders/workers/search:
     get:
