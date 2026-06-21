@@ -1,11 +1,13 @@
 openapi: 3.0.3
 info:
-  title: Harvesters Workers Hub API
+  title: Harvesters Workers Hub & Meetings API
   description: |
-    **Workers Hub** API surface — all routes under `/api/hub/...`.
-    Import this file into Postman: **Import → File → hub-api.openapi.yaml**.
+    **Workers Hub** (`/api/hub/...`) and **Meetings kiosks** (`/api/meeting/...`) on one API Gateway.
+    Import into Postman: **Import → File → hub-api.openapi.yaml**.
 
-    ## Authentication
+    ## Authentication (Hub)
+
+    Hub routes use JWT:
 
     1. `POST /api/hub/auth/signin` with admin login code (password field).
     2. Store `accessToken` from response.
@@ -158,7 +160,18 @@ info:
 
     ---
 
-    ## Flow 6 — Super admin panel
+    ## Flow 6 — Certificates
+
+    ```
+    POST /api/hub/certificate-templates
+    GET  /api/hub/certificate-templates
+    GET  /api/hub/verify/{certificateNumber}         → public (no auth)
+    GET  /api/hub/certificates/{certificateNumber}/download
+    ```
+
+    ---
+
+    ## Flow 7 — Super admin panel
 
     ```
     GET/POST/PUT/DELETE  /api/hub/super/admin/workers
@@ -166,6 +179,31 @@ info:
     PUT  /api/hub/super/admin/{id}/role
     PUT  /api/hub/super/admin/{id}/permissions
     ```
+
+    ---
+
+    ## Flow 8 — Departments & audit
+
+    ```
+    GET/POST/PUT/DELETE  /api/hub/departments
+    GET  /api/hub/audit
+    ```
+
+    ---
+
+    ## Flow 9 — Meetings kiosk (leaders meeting)
+
+    Uses **24h meeting API keys**, not JWT. Same API Gateway base URL.
+
+    ```
+    POST /api/meeting/auth/session          → issue/reuse api_key (no auth)
+    GET  /api/meeting/leaders/workers/search?name=First+Last
+    PUT  /api/meeting/leaders/workers/{workerId}   → fill missing fields only
+    POST /api/meeting/leaders/workers              → create when not found
+    ```
+
+    Search requires **≥2 name tokens** (first + surname minimum). Order-independent matching.
+    `PUT` only fills empty fields; overwriting existing values returns **409**.
 
     ---
 
@@ -197,6 +235,7 @@ tags:
   - name: "Flow 6 — Certificates"
   - name: "Flow 7 — Super Admin"
   - name: "Flow 8 — Departments & Audit"
+  - name: "Flow 9 — Meetings"
 
 security:
   - BearerAuth: []
@@ -1768,6 +1807,196 @@ paths:
         "200":
           description: Audit entries
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # FLOW 9 — MEETINGS (24h API key — not JWT)
+  # ─────────────────────────────────────────────────────────────────────────
+  /api/meeting/auth/session:
+    post:
+      tags: ["Flow 9 — Meetings"]
+      summary: Issue or reuse 24h meeting API key
+      operationId: meetingIssueSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingSessionRequest"
+            example:
+              client_id: "550e8400-e29b-41d4-a716-446655440000"
+              meeting_type: leaders
+      responses:
+        "200":
+          description: Existing valid key returned
+          content:
+            application/json:
+              example:
+                success: true
+                message: Existing session key returned
+                data:
+                  api_key: harv_mt_leaders_a1b2c3d4e5f6...
+                  meeting_type: leaders
+                  expires_at: "2026-06-24T12:00:00.000Z"
+                  reused: true
+        "201":
+          description: New key issued
+          content:
+            application/json:
+              example:
+                success: true
+                message: New session key issued
+                data:
+                  api_key: harv_mt_leaders_f6e5d4c3b2a1...
+                  meeting_type: leaders
+                  expires_at: "2026-06-24T12:00:00.000Z"
+                  reused: false
+
+  /api/meeting/leaders/workers/search:
+    get:
+      tags: ["Flow 9 — Meetings"]
+      summary: Search worker by full name (min 2 parts)
+      operationId: leadersSearchWorkers
+      security:
+        - MeetingApiKey: []
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: Full name — minimum first + surname (2 tokens)
+          schema:
+            type: string
+          example: Chidi Enwereji
+        - name: q
+          in: query
+          required: false
+          description: Alias for `name`
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Search results (may be empty array)
+          content:
+            application/json:
+              example:
+                success: true
+                message: 1 worker(s) found
+                count: 1
+                data:
+                  - id: 101
+                    name: Chidi Bede Enwereji
+                    department: Sound
+                    team: Gbagada Campus
+                    role: Member
+                    isMissing:
+                      - email
+                      - birthdate
+        "400":
+          description: Single-name search or missing query
+          content:
+            application/json:
+              example:
+                success: false
+                message: Enter at least first name and surname to search (minimum 2 name parts)
+        "401":
+          $ref: "#/components/responses/MeetingUnauthorized"
+
+  /api/meeting/leaders/workers/{workerId}:
+    put:
+      tags: ["Flow 9 — Meetings"]
+      summary: Update missing profile fields only
+      operationId: leadersUpdateWorker
+      security:
+        - MeetingApiKey: []
+      parameters:
+        - $ref: "#/components/parameters/meetingWorkerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingWorkerPatch"
+            example:
+              email: chidi.enwereji@example.com
+              phone: "+2348012345678"
+              role: Member
+              birthdate: "1990-05-15"
+              gender: Male
+      responses:
+        "200":
+          description: Fields updated
+          content:
+            application/json:
+              example:
+                success: true
+                message: Missing fields updated
+                data:
+                  id: 101
+                  name: Chidi Bede Enwereji
+                  department: Sound
+                  team: Gbagada Campus
+                  role: Member
+                  isMissing:
+                    - birthdate
+                  updated_fields:
+                    - email
+                    - phone
+        "404":
+          description: Worker not found
+        "409":
+          description: Field already set
+          content:
+            application/json:
+              example:
+                success: false
+                message: email is already set and cannot be changed via meetings
+        "401":
+          $ref: "#/components/responses/MeetingUnauthorized"
+
+  /api/meeting/leaders/workers:
+    post:
+      tags: ["Flow 9 — Meetings"]
+      summary: Create worker when search finds no match
+      operationId: leadersCreateWorker
+      security:
+        - MeetingApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingWorkerCreate"
+            example:
+              firstname: Chidi
+              lastname: Enwereji
+              othername: Bede
+              email: chidi.enwereji@example.com
+              phone: "+2348012345678"
+              role: Member
+              department: Sound
+              team: Gbagada Campus
+              birthdate: "1990-05-15"
+              gender: Male
+      responses:
+        "201":
+          description: Worker created (ACTIVE)
+          content:
+            application/json:
+              example:
+                success: true
+                message: Worker created
+                data:
+                  id: 1024
+                  name: Chidi Bede Enwereji
+                  department: Sound
+                  team: Gbagada Campus
+                  role: Member
+                  isMissing: []
+                  created: true
+        "400":
+          description: Validation error
+        "401":
+          $ref: "#/components/responses/MeetingUnauthorized"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1777,6 +2006,14 @@ components:
       description: |
         Obtain via POST /api/hub/auth/signin.
         Postman: set collection variable `accessToken`, then Authorization → Bearer {{accessToken}}
+    MeetingApiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: |
+        24h key from POST /api/meeting/auth/session.
+        Also accepted as `Authorization: Bearer <key>`.
+        Postman: set collection variable `meetingApiKey`.
 
   parameters:
     page:
@@ -1832,6 +2069,13 @@ components:
       required: false
       schema: { type: string, format: uuid }
       description: Prevents duplicate writes on retry (nominate, register, complete)
+    meetingWorkerId:
+      name: workerId
+      in: path
+      required: true
+      schema:
+        type: integer
+      example: 101
 
   schemas:
     CreateTrainingInput:
@@ -1861,6 +2105,97 @@ components:
           type: string
           enum: [Present, Absent, "Not recorded", Excused]
 
+    MeetingSessionRequest:
+      type: object
+      required: [client_id]
+      properties:
+        client_id:
+          type: string
+          maxLength: 128
+          description: Stable UUID from frontend localStorage
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        meeting_type:
+          type: string
+          enum: [leaders, workers]
+          default: leaders
+
+    MeetingWorkerPatch:
+      type: object
+      description: Only include fields to fill — must currently be empty on the worker
+      properties:
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          example: "+2348012345678"
+        role:
+          type: string
+          description: Maps to worker.workerrole
+          example: Member
+        department:
+          type: string
+          example: Sound
+        team:
+          type: string
+          example: Gbagada Campus
+        birthdate:
+          type: string
+          example: "1990-05-15"
+        gender:
+          type: string
+          example: Male
+
+    MeetingWorkerCreate:
+      type: object
+      required: [firstname, lastname]
+      properties:
+        firstname:
+          type: string
+          example: Chidi
+        lastname:
+          type: string
+          example: Enwereji
+        othername:
+          type: string
+          example: Bede
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+        department:
+          type: string
+        team:
+          type: string
+        birthdate:
+          type: string
+        gender:
+          type: string
+
+    MeetingWorkerResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        department:
+          type: string
+          nullable: true
+        team:
+          type: string
+          nullable: true
+        role:
+          type: string
+          nullable: true
+        isMissing:
+          type: array
+          items:
+            type: string
+            enum: [email, phone, role, department, team, birthdate, gender]
+
   responses:
     Unauthorized:
       description: Missing or invalid JWT
@@ -1876,3 +2211,10 @@ components:
           example:
             success: false
             message: Forbidden
+    MeetingUnauthorized:
+      description: Missing, invalid, or expired meeting API key
+      content:
+        application/json:
+          example:
+            success: false
+            message: API key expired — request a new session
