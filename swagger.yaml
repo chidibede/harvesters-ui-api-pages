@@ -2518,6 +2518,11 @@ paths:
                     isMissing:
                       - email
                       - birthdate
+                      - address
+                      - maritalstatus
+                      - agerange
+                      - employment
+                      - occupation
         "400":
           description: Single-name search or missing query
           content:
@@ -2549,6 +2554,11 @@ paths:
               role: Member
               birthdate: "1990-05-15"
               gender: Male
+              maritalstatus: Single
+              agerange: "26-35"
+              address: "12 Example Street, Gbagada, Lagos"
+              employment: Employed
+              occupation: Engineer
               meeting_date: "2026-06-22"
               is_confirmed: true
       responses:
@@ -2606,6 +2616,12 @@ paths:
               team: Gbagada Campus
               birthdate: "1990-05-15"
               gender: Male
+              maritalstatus: Single
+              agerange: "26-35"
+              address: "12 Example Street, Gbagada, Lagos"
+              employment: Employed
+              occupation: Engineer
+              campus: "Gbagada Campus"
       responses:
         "201":
           description: Worker submitted for approval (PENDING_ADD)
@@ -2866,14 +2882,19 @@ components:
           example: Male
         maritalstatus:
           type: string
+          example: Single
         agerange:
           type: string
+          example: "26-35"
         address:
           type: string
+          example: "12 Example Street, Gbagada, Lagos"
         employment:
           type: string
+          example: Employed
         occupation:
           type: string
+          example: Engineer
         meeting_date:
           type: string
           format: date
@@ -2923,18 +2944,25 @@ components:
           type: string
         gender:
           type: string
+          example: Male
         maritalstatus:
           type: string
+          example: Single
         agerange:
           type: string
+          example: "26-35"
         address:
           type: string
+          example: "12 Example Street, Gbagada, Lagos"
         employment:
           type: string
+          example: Employed
         occupation:
           type: string
+          example: Engineer
         campus:
           type: string
+          example: "Gbagada Campus"
 
     MeetingWorkerResult:
       type: object
@@ -2956,7 +2984,7 @@ components:
           type: array
           items:
             type: string
-            enum: [email, phone, role, department, team, birthdate, gender]
+            enum: [email, phone, role, department, team, birthdate, gender, maritalstatus, agerange, address, employment, occupation]
 
   responses:
     Unauthorized:
