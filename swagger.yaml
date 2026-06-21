@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Harvesters Workers Hub & Meetings API
   description: |
-    **Workers Hub** (`/api/hub/...`) and **Meetings kiosks** (`/api/meeting/...`) on one API Gateway.
+    **Workers Hub** (`/api/hub/...`) and **Meetings** (`/api/meeting/...`) on one API Gateway.
     Import into Postman: **Import → File → hub-api.openapi.yaml**.
 
     ## Authentication (Hub)
@@ -191,7 +191,7 @@ info:
 
     ---
 
-    ## Flow 9 — Meetings kiosk (leaders meeting)
+    ## Flow 9 — Meetings (leaders meeting)
 
     Uses **24h meeting API keys**, not JWT. Same API Gateway base URL.
 
